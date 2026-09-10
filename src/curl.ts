@@ -1,101 +1,169 @@
-import * as Effect from "effect/Effect"
 import * as Context from "effect/Context"
+import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Schedule from "effect/Schedule"
-import Bun, { type SyncSubprocess } from "bun"
-import type { TimeoutError } from "effect/Cause"
-import {
-  ErrorMessage,
-  GeneralCurlError,
-  JsonParseCurlError,
-  Message,
-} from "./error"
+import * as Schema from "effect/Schema"
 
-const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID
-const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET
-
-if (!CLIENT_ID || !CLIENT_SECRET) {
-  console.error("Missing SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET in .env")
-  process.exit(1)
+export interface CurlRequest {
+  readonly method: "GET" | "POST"
+  readonly url: string
+  readonly headers?: Readonly<Record<string, string>>
+  readonly form?: Readonly<Record<string, string>>
 }
 
-const REDIRECT_URL = "eg:http://localhost:8080" // your redirect URL - must be localhost URL and/or HTTPS
-
-const AUTHORIZATION_ENDPOINT = "https://accounts.spotify.com/authorize"
-const TOKEN_ENDPOINT = "https://accounts.spotify.com/api/token"
-const SCOPE = "user-read-private user-read-email"
-
-interface Interface {
-  readonly post: (
-    args: string[]
-  ) => Effect.Effect<AccessTokenResult, GeneralCurlError>
+export interface CurlResponse {
+  readonly stdout: string
+  readonly stderr: string
+  readonly exitCode: number
 }
 
-class CurlClient extends Context.Service<CurlClient, Interface>()(
-  "CurlClient"
+export const buildCurlArgs = (request: CurlRequest): readonly string[] => {
+  const args = [
+    "curl",
+    "--fail-with-body",
+    "--silent",
+    "--show-error",
+    "--request",
+    request.method,
+  ]
+
+  for (const [name, value] of Object.entries(request.headers ?? {})) {
+    args.push("--header", `${name}: ${value}`)
+  }
+
+  if (request.form) {
+    args.push("--data", new URLSearchParams(request.form).toString())
+  }
+
+  args.push(request.url)
+  return args
+}
+
+export class CurlProcessError extends Schema.TaggedError<CurlProcessError>()(
+  "SpotUI/CurlProcessError",
+  {
+    args: Schema.Array(Schema.String),
+    stdout: Schema.String,
+    stderr: Schema.String,
+    exitCode: Schema.Number,
+    message: Schema.String,
+  }
 ) {}
 
-type AccessTokenResult = {
-  access_token: string
-  token_type: "Bearer"
-  expires_in: number
+export class CurlJsonError extends Schema.TaggedError<CurlJsonError>()(
+  "SpotUI/CurlJsonError",
+  { stdout: Schema.String, message: Schema.String, cause: Schema.Unknown }
+) {}
+
+export interface CurlRunnerShape {
+  readonly run: (
+    request: CurlRequest
+  ) => Effect.Effect<CurlResponse, CurlProcessError>
+  readonly runJson: <S extends Schema.Constraint>(
+    schema: S,
+    request: CurlRequest
+  ) => Effect.Effect<
+    S["Type"],
+    CurlProcessError | CurlJsonError | Schema.SchemaError,
+    S["DecodingServices"]
+  >
 }
 
-const CurlClientLayer = Layer.effect(
-  CurlClient,
-  Effect.gen(function* () {
-    const post = Effect.fn("CurlClient/post")(
-      (args: string[]): Effect.Effect<AccessTokenResult, GeneralCurlError> =>
-        Effect.gen(function* () {
-          const result = Bun.spawnSync({
-            cmd: ["curl", "-X", "POST", ...args],
-            stdout: "pipe",
-            stderr: "pipe",
-          })
+export class CurlRunner extends Context.Service<CurlRunner, CurlRunnerShape>()(
+  "SpotUI/CurlRunner"
+) {}
 
-          return result
-        }).pipe(
-          Effect.tapCause(
-            (cause) =>
-              new GeneralCurlError({
-                cause,
-                message: ErrorMessage.make(
-                  "Something went wrong while executing the curl command."
-                ),
-              })
+const readStream = async (stream: ReadableStream | null | undefined) =>
+  stream ? Bun.readableStreamToText(stream) : ""
+
+const runProcess = (args: readonly string[]) =>
+  Effect.tryPromise({
+    try: async (signal) => {
+      const process = Bun.spawn({
+        cmd: [...args],
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      const kill = () => process.kill()
+      signal.addEventListener("abort", kill, { once: true })
+
+      try {
+        const [exitCode, stdout, stderr] = await Promise.all([
+          process.exited,
+          readStream(process.stdout),
+          readStream(process.stderr),
+        ])
+        return { exitCode, stdout, stderr }
+      } finally {
+        signal.removeEventListener("abort", kill)
+      }
+    },
+    catch: (cause) =>
+      new CurlProcessError({
+        args: [...args],
+        stdout: "",
+        stderr: String(cause),
+        exitCode: -1,
+        message: "The curl process could not be started.",
+      }),
+  })
+
+export const CurlRunnerLive = Layer.effect(
+  CurlRunner,
+  Effect.gen(function* () {
+    const run = Effect.fn("CurlRunner/run")((request: CurlRequest) => {
+      const args = buildCurlArgs(request)
+      return Effect.timeoutOrElse(runProcess(args), {
+        duration: "15 seconds",
+        orElse: () =>
+          Effect.fail(
+            new CurlProcessError({
+              args: [...args],
+              stdout: "",
+              stderr: "",
+              exitCode: -1,
+              message: "The curl request timed out.",
+            })
           ),
-          Effect.map((value) => JSON.parse(value.stdout.toString())),
-          Effect.tap((result) => Effect.sync(() => console.log(result)))
+      }).pipe(
+        Effect.flatMap((result) =>
+          result.exitCode === 0
+            ? Effect.succeed(result)
+            : Effect.fail(
+                new CurlProcessError({
+                  args: [...args],
+                  ...result,
+                  message: "The curl request failed.",
+                })
+              )
+        )
+      )
+    })
+
+    const runJson = Effect.fn("CurlRunner/runJson")(
+      <S extends Schema.Constraint>(schema: S, request: CurlRequest) =>
+        run(request).pipe(
+          Effect.flatMap((result) =>
+            Effect.try({
+              try: () => JSON.parse(result.stdout) as unknown,
+              catch: (cause) =>
+                new CurlJsonError({
+                  stdout: result.stdout,
+                  message: "The curl response was not valid JSON.",
+                  cause,
+                }),
+            })
+          ),
+          Effect.flatMap(Schema.decodeUnknownEffect(schema)),
+          Effect.mapError((error) =>
+            error instanceof Schema.SchemaError
+              ? error
+              : error instanceof CurlJsonError
+                ? error
+                : error
+          )
         )
     )
 
-    return CurlClient.of({
-      post,
-    })
+    return CurlRunner.of({ run, runJson })
   })
 )
-
-const ACCESS_TOKEN_ARGS = [
-  TOKEN_ENDPOINT,
-  "-H",
-  "Content-Type: application/x-www-form-urlencoded",
-  "-d",
-  `grant_type=client_credentials&client_id=${CLIENT_ID}&client_secret=${CLIENT_SECRET}`,
-]
-
-const program = Effect.gen(function* () {
-  const curlClient = yield* CurlClient
-  const accessToken = yield* curlClient
-    .post(ACCESS_TOKEN_ARGS)
-    .pipe(
-      Effect.timeout("5 seconds"),
-      Effect.retry(
-        Schedule.max([Schedule.exponential("100 millis"), Schedule.recurs(3)])
-      ),
-      Effect.timeout("15 seconds")
-    )
-  return accessToken
-}).pipe(Effect.orDie)
-
-const runnable = Effect.provide(program, CurlClientLayer)
-await Effect.runPromise(runnable)

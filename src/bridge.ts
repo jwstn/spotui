@@ -1,0 +1,297 @@
+import { Effect } from "effect"
+import type { SpotifyCredentials } from "./config"
+import type { BearerToken } from "./auth"
+import type { Continuation, LibraryCollection, Page, PlaylistItem, PlaylistSummary, Track, Album, Artist } from "./domain"
+import type { SpotifyApiShape } from "./spotifyApi"
+
+export type CollectionStatus = "idle" | "loading" | "refreshing" | "ready" | "error"
+
+export interface CollectionState<T> {
+  readonly status: CollectionStatus
+  readonly items: readonly T[]
+  readonly continuation: Continuation | null
+  readonly error: string | null
+  readonly generation: number
+  readonly loadingMore: boolean
+}
+
+export const initialCollectionState = <T>(): CollectionState<T> => ({
+  status: "idle",
+  items: [],
+  continuation: null,
+  error: null,
+  generation: 0,
+  loadingMore: false,
+})
+
+export const beginCollectionLoad = <T>(
+  state: CollectionState<T>,
+  generation: number
+): CollectionState<T> => ({
+  ...state,
+  status: state.items.length > 0 ? "refreshing" : "loading",
+  error: null,
+  generation,
+  loadingMore: false,
+})
+
+export const completeCollectionLoad = <T>(
+  state: CollectionState<T>,
+  generation: number,
+  page: Pick<Page<T>, "items" | "continuation">
+): CollectionState<T> =>
+  state.generation !== generation
+    ? state
+    : {
+        ...state,
+        status: "ready",
+        items: page.items,
+        continuation: page.continuation,
+        error: null,
+        loadingMore: false,
+      }
+
+export const failCollectionLoad = <T>(
+  state: CollectionState<T>,
+  generation: number,
+  error: string
+): CollectionState<T> =>
+  state.generation !== generation
+    ? state
+    : {
+        ...state,
+        status: "error",
+        error,
+        loadingMore: false,
+      }
+
+export const beginLoadMore = <T>(state: CollectionState<T>) =>
+  state.loadingMore || state.continuation === null
+    ? state
+    : { ...state, loadingMore: true, error: null }
+
+export const completeLoadMore = <T>(
+  state: CollectionState<T>,
+  page: Pick<Page<T>, "items" | "continuation">
+): CollectionState<T> => ({
+  ...state,
+  status: "ready",
+  items: [...state.items, ...page.items],
+  continuation: page.continuation,
+  error: null,
+  loadingMore: false,
+})
+
+export const failLoadMore = <T>(state: CollectionState<T>, error: string) => ({
+  ...state,
+  error,
+  loadingMore: false,
+})
+
+export type BridgeCollection =
+  | PlaylistSummary
+  | Track
+  | Album
+  | Artist
+  | PlaylistItem
+
+export interface BridgeSnapshot {
+  readonly auth: "loading" | "login" | "ready" | "error"
+  readonly authError: string | null
+  readonly activeCollection: LibraryCollection
+  readonly selectedIndex: number
+  readonly playlistId: string | null
+  readonly playlistItems: CollectionState<PlaylistItem> | null
+  readonly collections: {
+    readonly playlists: CollectionState<PlaylistSummary>
+    readonly "saved-tracks": CollectionState<Track>
+    readonly "saved-albums": CollectionState<Album>
+    readonly "followed-artists": CollectionState<Artist>
+  }
+}
+
+export interface BridgeDependencies {
+  readonly credentials: SpotifyCredentials
+  readonly refreshToken: (
+    credentials: SpotifyCredentials
+  ) => Promise<BearerToken>
+  readonly api: SpotifyApiShape
+}
+
+const initialSnapshot = (): BridgeSnapshot => ({
+  auth: "loading",
+  authError: null,
+  activeCollection: "playlists",
+  selectedIndex: 0,
+  playlistId: null,
+  playlistItems: null,
+  collections: {
+    playlists: initialCollectionState(),
+    "saved-tracks": initialCollectionState(),
+    "saved-albums": initialCollectionState(),
+    "followed-artists": initialCollectionState(),
+  },
+})
+
+export class SpotifyBridge {
+  private snapshot = initialSnapshot()
+  private readonly listeners = new Set<() => void>()
+  private token: BearerToken | null = null
+  private generation = 0
+
+  constructor(private readonly dependencies: BridgeDependencies) {}
+
+  getSnapshot = () => this.snapshot
+
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
+  private update = (update: (current: BridgeSnapshot) => BridgeSnapshot) => {
+    this.snapshot = update(this.snapshot)
+    for (const listener of this.listeners) listener()
+  }
+
+  private accessToken = async () => {
+    if (this.token && this.token.expiresAt > Date.now() + 30_000) return this.token.accessToken
+    this.token = await this.dependencies.refreshToken(this.dependencies.credentials)
+    return this.token.accessToken
+  }
+
+  start = async () => {
+    this.update((current) => ({ ...current, auth: "loading", authError: null }))
+    try {
+      await this.accessToken()
+      this.update((current) => ({ ...current, auth: "ready" }))
+      await Promise.all([
+        this.loadCollection("playlists"),
+        this.loadCollection("saved-tracks"),
+        this.loadCollection("saved-albums"),
+        this.loadCollection("followed-artists"),
+      ])
+    } catch (error) {
+      this.update((current) => ({
+        ...current,
+        auth: "error",
+        authError: error instanceof Error ? error.message : String(error),
+      }))
+    }
+  }
+
+  selectCollection = (collection: LibraryCollection) =>
+    this.update((current) => ({
+      ...current,
+      activeCollection: collection,
+      selectedIndex: 0,
+      playlistId: null,
+      playlistItems: null,
+    }))
+
+  moveSelection = (delta: -1 | 1) =>
+    this.update((current) => {
+      const items = current.playlistItems?.items ?? current.collections[current.activeCollection].items
+      const next = items.length === 0 ? 0 : (current.selectedIndex + delta + items.length) % items.length
+      return { ...current, selectedIndex: next }
+    })
+
+  back = () =>
+    this.update((current) => ({
+      ...current,
+      playlistId: null,
+      playlistItems: null,
+      selectedIndex: 0,
+    }))
+
+  openSelected = async () => {
+    const current = this.snapshot
+    if (current.activeCollection !== "playlists" || current.playlistId !== null) return
+    const playlist = current.collections.playlists.items[current.selectedIndex]
+    if (!playlist) return
+    this.update((state) => ({ ...state, playlistId: playlist.id, playlistItems: beginCollectionLoad(initialCollectionState(), ++this.generation) }))
+    try {
+      const page = await this.runApi((api, token) => api.listPlaylistItems(token, playlist.id))
+      this.update((state) => ({ ...state, playlistItems: completeCollectionLoad(state.playlistItems ?? initialCollectionState(), this.generation, page) }))
+    } catch (error) {
+      this.update((state) => ({ ...state, playlistItems: failCollectionLoad(state.playlistItems ?? initialCollectionState(), this.generation, String(error)) }))
+    }
+  }
+
+  loadMore = async () => {
+    const current = this.snapshot
+    if (current.playlistItems) {
+      if (current.playlistItems.continuation === null || current.playlistItems.loadingMore || current.playlistId === null) return
+      this.update((state) => ({ ...state, playlistItems: beginLoadMore(state.playlistItems!) }))
+      try {
+        const page = await this.runApi((api, token) => api.listPlaylistItems(token, current.playlistId!, current.playlistItems!.continuation))
+        this.update((state) => ({ ...state, playlistItems: completeLoadMore(state.playlistItems!, page) }))
+      } catch (error) {
+        this.update((state) => ({ ...state, playlistItems: failLoadMore(state.playlistItems!, String(error)) }))
+      }
+      return
+    }
+    const collection = current.activeCollection
+    const state = current.collections[collection] as CollectionState<any>
+    if (state.continuation === null || state.loadingMore) return
+    this.update((snapshot) => ({ ...snapshot, collections: { ...snapshot.collections, [collection]: beginLoadMore(snapshot.collections[collection] as CollectionState<any>) } }))
+    try {
+      const page = await this.runCollectionApi(collection, state.continuation)
+      this.update((snapshot) => ({ ...snapshot, collections: { ...snapshot.collections, [collection]: completeLoadMore(snapshot.collections[collection] as CollectionState<any>, page) } }))
+    } catch (error) {
+      this.update((snapshot) => ({ ...snapshot, collections: { ...snapshot.collections, [collection]: failLoadMore(snapshot.collections[collection] as CollectionState<any>, String(error)) } }))
+    }
+  }
+
+  refresh = async () => {
+    const collection = this.snapshot.activeCollection
+    await this.loadCollection(collection)
+  }
+
+  private loadCollection = async (collection: LibraryCollection) => {
+    const generation = ++this.generation
+    this.update((snapshot) => ({
+      ...snapshot,
+      collections: {
+        ...snapshot.collections,
+        [collection]: beginCollectionLoad(snapshot.collections[collection] as CollectionState<any>, generation),
+      },
+    }))
+    try {
+      const page = await this.runCollectionApi(collection)
+      this.update((snapshot) => ({
+        ...snapshot,
+        collections: {
+          ...snapshot.collections,
+          [collection]: completeCollectionLoad(snapshot.collections[collection] as CollectionState<any>, generation, page),
+        },
+      }))
+    } catch (error) {
+      this.update((snapshot) => ({
+        ...snapshot,
+        collections: {
+          ...snapshot.collections,
+          [collection]: failCollectionLoad(snapshot.collections[collection] as CollectionState<any>, generation, String(error)),
+        },
+      }))
+    }
+  }
+
+  private runApi = async <A>(
+    operation: (api: SpotifyApiShape, token: string) => Effect.Effect<A, unknown>
+  ) => operation(this.dependencies.api, await this.accessToken()).pipe(Effect.runPromise)
+
+  private runCollectionApi = (collection: LibraryCollection, continuation?: Continuation | null) => {
+    switch (collection) {
+      case "playlists":
+        return this.runApi((api, token) => api.listPlaylists(token, continuation))
+      case "saved-tracks":
+        return this.runApi((api, token) => api.listSavedTracks(token, continuation))
+      case "saved-albums":
+        return this.runApi((api, token) => api.listSavedAlbums(token, continuation))
+      case "followed-artists":
+        return this.runApi((api, token) => api.listFollowedArtists(token, continuation))
+    }
+  }
+}
