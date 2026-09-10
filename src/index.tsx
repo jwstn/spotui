@@ -6,7 +6,7 @@ import { useEffect, useState } from "react"
 import { readConfig, resolveConfigPath, type ConfigPath } from "./config"
 import type { BridgeSnapshot } from "./bridge"
 import { commandDefinitions, dispatchCommand, type CommandId } from "./commands"
-import { createLiveBridge } from "./runtime"
+import { authorizeWithPkce, createLiveBridge } from "./runtime"
 import { resolveTheme, defaultThemeConfig, type ColorPalette } from "./theme"
 
 const configPath = resolveConfigPath({
@@ -31,18 +31,48 @@ const collectionLabels = {
 
 const collectionKeys = Object.keys(collectionLabels) as Array<keyof typeof collectionLabels>
 
-const LoginScreen = ({ path, message, colors }: { readonly path: string; readonly message: string; readonly colors: ColorPalette }) => (
-  <box flexGrow={1} justifyContent="center" alignItems="center" backgroundColor={colors.background}>
-    <box width={72} flexDirection="column" padding={2} backgroundColor={colors.panel}>
-      <text fg={colors.accent}>SPOTUI LOGIN</text>
-      <text fg={colors.text}>Spotify user authorization is required.</text>
-      <text fg={colors.muted}>{message}</text>
-      <text fg={colors.muted}>Config path: {path}</text>
-      <text fg={colors.text}>Create an app in the Spotify Developer Dashboard, then provide its client ID to start PKCE authorization.</text>
-      <text fg={colors.accent}>The app never asks for a client secret or bearer token.</text>
+const LoginScreen = ({
+  path,
+  message,
+  colors,
+  onAuthorized,
+}: {
+  readonly path: string
+  readonly message: string
+  readonly colors: ColorPalette
+  readonly onAuthorized: (credentials: { readonly clientId: string; readonly refreshToken: string }) => void
+}) => {
+  const [clientId, setClientId] = useState("")
+  const [status, setStatus] = useState<string | null>(null)
+  useKeyboard((event) => {
+    const key = event.name.toLowerCase()
+    if (key === "backspace") return setClientId((value) => value.slice(0, -1))
+    if (key === "return" || key === "enter") {
+      if (!clientId.trim()) return setStatus("Enter a Spotify client ID first.")
+      setStatus("Opening the Spotify authorization page...")
+      void authorizeWithPkce(clientId.trim(), path).then(onAuthorized, (error) => setStatus(String(error)))
+      return
+    }
+    if (!event.ctrl && !event.meta && key.length === 1) setClientId((value) => value + event.name)
+  })
+
+  return (
+    <box flexGrow={1} justifyContent="center" alignItems="center" backgroundColor={colors.background}>
+      <box width={72} flexDirection="column" padding={2} backgroundColor={colors.panel}>
+        <text fg={colors.accent}>SPOTIFY LOGIN</text>
+        <text fg={colors.text}>Spotify user authorization is required.</text>
+        <text fg={colors.muted}>{message}</text>
+        <text fg={colors.muted}>Config path: {path}</text>
+        <text fg={colors.text}>Create an app in the Spotify Developer Dashboard, then enter its client ID:</text>
+        <box backgroundColor={colors.selectedBackground}>
+          <text fg={colors.selectedText}>{clientId || "_"}</text>
+        </box>
+        <text fg={colors.accent}>Enter to open the PKCE browser flow. Esc is not required.</text>
+        <text fg={colors.muted}>{status ?? "The app never asks for a client secret or bearer token."}</text>
+      </box>
     </box>
-  </box>
-)
+  )
+}
 
 const ErrorScreen = ({ path, message, colors }: { readonly path: string; readonly message: string; readonly colors: ColorPalette }) => (
   <box flexGrow={1} justifyContent="center" alignItems="center" backgroundColor={colors.background}>
@@ -190,7 +220,7 @@ const App = () => {
         } else if (result.kind === "invalid") {
           setState({ kind: configPath.kind === "override" ? "error" : "login", path: result.path, message: result.message })
         } else {
-          const bridge = createLiveBridge(result)
+          const bridge = createLiveBridge(result, result.path)
           setState({ kind: "ready", bridge })
           void bridge.start()
         }
@@ -205,7 +235,20 @@ const App = () => {
     return <box flexGrow={1} justifyContent="center" alignItems="center" backgroundColor={colors.background}><text fg={colors.error}>Need a terminal at least 60x16.</text></box>
   }
   if (state.kind === "loading") return <box flexGrow={1} justifyContent="center" alignItems="center" backgroundColor={colors.background}><text fg={colors.accent}>Loading SpotUI...</text></box>
-  if (state.kind === "login") return <LoginScreen path={state.path} message={state.message} colors={colors} />
+  if (state.kind === "login") {
+    return (
+      <LoginScreen
+        path={state.path}
+        message={state.message}
+        colors={colors}
+        onAuthorized={(credentials) => {
+          const bridge = createLiveBridge(credentials, configPath.path)
+          setState({ kind: "ready", bridge })
+          void bridge.start()
+        }}
+      />
+    )
+  }
   if (state.kind === "error") return <ErrorScreen path={state.path} message={state.message} colors={colors} />
   return <BridgeView bridge={state.bridge} colors={colors} />
 }

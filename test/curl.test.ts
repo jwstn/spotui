@@ -23,6 +23,8 @@ describe("curl command construction", () => {
       "Authorization: Bearer runtime-token",
       "--header",
       "Accept: application/json",
+      "--write-out",
+      "\\n%{http_code}",
       "https://api.spotify.com/v1/me/playlists",
     ])
   })
@@ -50,6 +52,8 @@ describe("curl command construction", () => {
       "Content-Type: application/x-www-form-urlencoded",
       "--data",
       "grant_type=refresh_token&client_id=public-id&refresh_token=refresh-value",
+      "--write-out",
+      "\\n%{http_code}",
       "https://accounts.spotify.com/api/token",
     ])
   })

@@ -1,6 +1,7 @@
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 
 export interface CurlRequest {
@@ -14,6 +15,7 @@ export interface CurlResponse {
   readonly stdout: string
   readonly stderr: string
   readonly exitCode: number
+  readonly statusCode: number | null
 }
 
 export const buildCurlArgs = (request: CurlRequest): readonly string[] => {
@@ -34,6 +36,7 @@ export const buildCurlArgs = (request: CurlRequest): readonly string[] => {
     args.push("--data", new URLSearchParams(request.form).toString())
   }
 
+  args.push("--write-out", "\\n%{http_code}")
   args.push(request.url)
   return args
 }
@@ -45,6 +48,7 @@ export class CurlProcessError extends Schema.TaggedError<CurlProcessError>()(
     stdout: Schema.String,
     stderr: Schema.String,
     exitCode: Schema.Number,
+    statusCode: Schema.NullOr(Schema.Number),
     message: Schema.String,
   }
 ) {}
@@ -75,6 +79,13 @@ export class CurlRunner extends Context.Service<CurlRunner, CurlRunnerShape>()(
 const readStream = async (stream: ReadableStream | null | undefined) =>
   stream ? Bun.readableStreamToText(stream) : ""
 
+const splitStatusCode = (stdout: string) => {
+  const match = stdout.match(/\n(\d{3})$/)
+  return match
+    ? { stdout: stdout.slice(0, match.index), statusCode: Number(match[1]) }
+    : { stdout, statusCode: null }
+}
+
 const runProcess = (args: readonly string[]) =>
   Effect.tryPromise({
     try: async (signal) => {
@@ -103,6 +114,7 @@ const runProcess = (args: readonly string[]) =>
         stdout: "",
         stderr: String(cause),
         exitCode: -1,
+        statusCode: null,
         message: "The curl process could not be started.",
       }),
   })
@@ -110,7 +122,7 @@ const runProcess = (args: readonly string[]) =>
 export const CurlRunnerLive = Layer.effect(
   CurlRunner,
   Effect.gen(function* () {
-    const run = Effect.fn("CurlRunner/run")((request: CurlRequest) => {
+    const attempt = Effect.fn("CurlRunner/attempt")((request: CurlRequest) => {
       const args = buildCurlArgs(request)
       return Effect.timeoutOrElse(runProcess(args), {
         duration: "15 seconds",
@@ -121,12 +133,14 @@ export const CurlRunnerLive = Layer.effect(
               stdout: "",
               stderr: "",
               exitCode: -1,
+              statusCode: null,
               message: "The curl request timed out.",
             })
           ),
       }).pipe(
+        Effect.map((result) => ({ ...result, ...splitStatusCode(result.stdout) })),
         Effect.flatMap((result) =>
-          result.exitCode === 0
+          result.exitCode === 0 && (result.statusCode === null || result.statusCode < 400)
             ? Effect.succeed(result)
             : Effect.fail(
                 new CurlProcessError({
@@ -138,6 +152,17 @@ export const CurlRunnerLive = Layer.effect(
         )
       )
     })
+
+    const run = Effect.fn("CurlRunner/run")((request: CurlRequest) =>
+      attempt(request).pipe(
+        Effect.retry({
+          times: 2,
+          schedule: Schedule.exponential("300 millis"),
+          while: (error) =>
+            error.statusCode === null || error.statusCode === 429 || error.statusCode >= 500,
+        })
+      )
+    )
 
     const runJson = Effect.fn("CurlRunner/runJson")(
       <S extends Schema.Constraint>(schema: S, request: CurlRequest) =>

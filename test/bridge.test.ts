@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test"
+import { Effect } from "effect"
 import {
   beginCollectionLoad,
   completeCollectionLoad,
   failCollectionLoad,
   initialCollectionState,
 } from "../src/bridge"
+import { SpotifyBridge } from "../src/bridge"
 
 describe("bridge collection state", () => {
   test("keeps existing data visible during refresh", () => {
@@ -54,5 +56,35 @@ describe("bridge collection state", () => {
       generation: 3,
       loadingMore: false,
     })
+  })
+
+  test("loads the authenticated library through the typed bridge", async () => {
+    const bridge = new SpotifyBridge({
+      credentials: { clientId: "client", refreshToken: "refresh" },
+      refreshToken: async () => ({
+        accessToken: "access",
+        expiresAt: Date.now() + 60_000,
+        refreshToken: null,
+      }),
+      api: {
+        listPlaylists: () =>
+          Effect.succeed({
+            items: [{ kind: "playlist" as const, id: "playlist-1", name: "Mix", imageUrl: null, itemCount: 1 }],
+            total: 1,
+            continuation: null,
+          }),
+        listPlaylistItems: () => Effect.succeed({ items: [], total: 0, continuation: null }),
+        listSavedTracks: () => Effect.succeed({ items: [], total: 0, continuation: null }),
+        listSavedAlbums: () => Effect.succeed({ items: [], total: 0, continuation: null }),
+        listFollowedArtists: () => Effect.succeed({ items: [], total: 0, continuation: null }),
+      },
+    })
+
+    await bridge.start()
+
+    expect(bridge.getSnapshot().auth).toBe("ready")
+    expect(bridge.getSnapshot().collections.playlists.items).toEqual([
+      { kind: "playlist", id: "playlist-1", name: "Mix", imageUrl: null, itemCount: 1 },
+    ])
   })
 })

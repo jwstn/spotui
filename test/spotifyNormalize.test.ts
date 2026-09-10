@@ -62,6 +62,8 @@ describe("Spotify response normalization", () => {
       {
         kind: "unavailable",
         key: "playlist-1:3",
+        id: null,
+        name: null,
         reason: "missing",
       },
       {

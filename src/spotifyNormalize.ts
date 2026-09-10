@@ -14,6 +14,7 @@ import type {
   RawPlaylistItem,
   RawTrack,
 } from "./spotifySchemas"
+import { Predicate } from "effect"
 
 const firstImage = (images: readonly { readonly url: string }[] | undefined) =>
   images?.[0]?.url ?? null
@@ -50,9 +51,6 @@ export const normalizePlaylist = (raw: RawPlaylist): PlaylistSummary => ({
   itemCount: raw.tracks?.total ?? null,
 })
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null
-
 export const normalizePlaylistItem = (
   raw: RawPlaylistItem,
   playlistId: string,
@@ -60,8 +58,8 @@ export const normalizePlaylistItem = (
 ): PlaylistItem => {
   const key = `${playlistId}:${position}`
   const item = raw.item ?? raw.track
-  if (!isObject(item)) {
-    return { kind: "unavailable", key, reason: "missing" }
+  if (!Predicate.isObject(item)) {
+    return { kind: "unavailable", key, id: null, name: null, reason: "missing" }
   }
 
   if (item.type === "episode") {
@@ -85,15 +83,22 @@ export const normalizePlaylistItem = (
     return { ...normalizeTrack(item as RawTrack), key }
   }
 
-  return { kind: "unavailable", key, reason: "unsupported" }
+  return {
+    kind: "unavailable",
+    key,
+    id: typeof item.id === "string" ? item.id : null,
+    name: typeof item.name === "string" ? item.name : null,
+    reason: "unsupported",
+  }
 }
 
 export const pageFromOffset = <T>(
   items: readonly T[],
-  input: { readonly offset: number; readonly limit: number; readonly total?: number }
+  input: { readonly offset: number; readonly limit: number; readonly total?: number },
+  sourceCount = items.length
 ): Page<T> => {
-  const nextOffset = input.offset + items.length
-  const hasMore = input.total === undefined ? items.length >= input.limit : nextOffset < input.total
+  const nextOffset = input.offset + sourceCount
+  const hasMore = input.total === undefined ? sourceCount >= input.limit : nextOffset < input.total
   return {
     items,
     total: input.total ?? null,

@@ -56,6 +56,8 @@ export interface LocalItem {
 export interface UnavailableItem {
   readonly kind: "unavailable"
   readonly key: string
+  readonly id: string | null
+  readonly name: string | null
   readonly reason: "missing" | "unsupported" | "restricted"
 }
 

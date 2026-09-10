@@ -111,7 +111,8 @@ export const SpotifyApiLive = Layer.effect(
               response.items.map((item, index) =>
                 normalizePlaylistItem(item, playlistId, (continuation?.kind === "offset" ? continuation.offset : 0) + index)
               ),
-              response
+              response,
+              response.items.length
             )
           ),
           Effect.mapError((cause) =>
@@ -129,7 +130,8 @@ export const SpotifyApiLive = Layer.effect(
           Effect.map((response) =>
             pageFromOffset(
               response.items.flatMap(({ track }) => (track ? [normalizeTrack(track)] : [])),
-              response
+              response,
+              response.items.length
             )
           ),
           Effect.mapError((cause) =>
@@ -147,7 +149,8 @@ export const SpotifyApiLive = Layer.effect(
           Effect.map((response) =>
             pageFromOffset(
               response.items.flatMap(({ album }) => (album ? [normalizeAlbum(album)] : [])),
-              response
+              response,
+              response.items.length
             )
           ),
           Effect.mapError((cause) =>

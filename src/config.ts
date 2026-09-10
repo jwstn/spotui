@@ -74,6 +74,15 @@ export const resolveConfigPath = (input: ConfigPathInput): ConfigPath => {
 const textField = (value: unknown) =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null
 
+const ConfigFileSchema = Schema.Struct({
+  spotify: Schema.optionalKey(
+    Schema.Struct({
+      client_id: Schema.optionalKey(Schema.String),
+      refresh_token: Schema.optionalKey(Schema.String),
+    })
+  ),
+})
+
 export const parseSpotifyConfig = (
   contents: string,
   path: string
@@ -85,23 +94,23 @@ export const parseSpotifyConfig = (
     return { kind: "invalid", path, message: "Config is not valid TOML." }
   }
 
-  if (typeof value !== "object" || value === null || !("spotify" in value)) {
+  let decoded: Schema.Schema.Type<typeof ConfigFileSchema>
+  try {
+    decoded = Schema.decodeUnknownSync(ConfigFileSchema)(value)
+  } catch {
+    return { kind: "invalid", path, message: "Config fields are invalid." }
+  }
+
+  if (!decoded.spotify) {
     return { kind: "invalid", path, message: "Missing [spotify] section." }
   }
 
-  const spotify = value.spotify
-  if (typeof spotify !== "object" || spotify === null) {
-    return { kind: "invalid", path, message: "The [spotify] section is invalid." }
-  }
-
-  const fields = spotify as Record<string, unknown>
-
-  const clientId = textField(fields.client_id)
+  const clientId = textField(decoded.spotify.client_id)
   if (!clientId) {
     return { kind: "invalid", path, message: "Missing spotify.client_id." }
   }
 
-  const refreshToken = textField(fields.refresh_token)
+  const refreshToken = textField(decoded.spotify.refresh_token)
   if (!refreshToken) {
     return { kind: "invalid", path, message: "Missing spotify.refresh_token." }
   }

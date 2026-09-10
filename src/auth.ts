@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Schema } from "effect"
+import { Clock, Context, Effect, Layer, Schema } from "effect"
 import { dirname } from "node:path"
 import { chmod, mkdir, rename } from "node:fs/promises"
 
@@ -84,9 +84,30 @@ export const refreshTokenRequest = (credentials: SpotifyCredentials) => ({
   },
 })
 
-const toBearerToken = (response: Schema.Schema.Type<typeof RawTokenResponseSchema>) => ({
+export const authorizationCodeRequest = (input: {
+  readonly clientId: string
+  readonly code: string
+  readonly redirectUri: string
+  readonly verifier: string
+}) => ({
+  method: "POST" as const,
+  url: TOKEN_ENDPOINT,
+  headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  form: {
+    grant_type: "authorization_code",
+    client_id: input.clientId,
+    code: input.code,
+    redirect_uri: input.redirectUri,
+    code_verifier: input.verifier,
+  },
+})
+
+const toBearerToken = (
+  response: Schema.Schema.Type<typeof RawTokenResponseSchema>,
+  now: number
+) => ({
   accessToken: response.access_token,
-  expiresAt: Date.now() + response.expires_in * 1000,
+  expiresAt: now + response.expires_in * 1000,
   refreshToken: response.refresh_token ?? null,
 })
 
@@ -94,6 +115,10 @@ export interface AuthServiceShape {
   readonly refresh: (
     credentials: SpotifyCredentials
   ) => Effect.Effect<BearerToken, AuthError | CurlProcessError | Schema.SchemaError>
+  readonly authorize: (
+    clientId: string,
+    configPath: string
+  ) => Effect.Effect<SpotifyCredentials, AuthError | CurlProcessError | Schema.SchemaError>
 }
 
 export class AuthService extends Context.Service<AuthService, AuthServiceShape>()(
@@ -106,17 +131,132 @@ export const AuthServiceLive = Layer.effect(
     const curl = yield* CurlRunner
     const refresh = Effect.fn("AuthService/refresh")((credentials: SpotifyCredentials) =>
       curl.runJson(RawTokenResponseSchema, refreshTokenRequest(credentials)).pipe(
-        Effect.map(toBearerToken),
+        Effect.flatMap((response) =>
+          Clock.currentTimeMillis.pipe(Effect.map((now) => toBearerToken(response, now)))
+        ),
         Effect.mapError((cause) =>
-          cause instanceof AuthError
-            ? cause
-            : new AuthError({ message: "Spotify authorization could not be refreshed.", cause })
+          new AuthError({
+            message: "Spotify authorization could not be refreshed.",
+            cause,
+          })
         )
       )
     )
-    return AuthService.of({ refresh })
+
+    const authorize = Effect.fn("AuthService/authorize")(function* (clientId: string, configPath: string) {
+      const pair = yield* Effect.tryPromise({
+        try: createPkcePair,
+        catch: (cause) => new AuthError({ message: "PKCE could not be initialized.", cause }),
+      })
+      const state = base64Url(crypto.getRandomValues(new Uint8Array(24)).buffer as ArrayBuffer)
+      const callback = yield* waitForAuthorizationCode({ clientId, pair, state })
+      const response = yield* curl
+        .runJson(
+          RawTokenResponseSchema,
+          authorizationCodeRequest({
+            clientId,
+            code: callback.code,
+            redirectUri: callback.redirectUri,
+            verifier: pair.verifier,
+          })
+        )
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new AuthError({
+                message: "Spotify authorization code exchange failed.",
+                cause,
+              })
+          )
+        )
+      if (!response.refresh_token) {
+        return yield* new AuthError({
+          message: "Spotify did not return a refresh token.",
+          cause: response,
+        })
+      }
+      const credentials = { clientId, refreshToken: response.refresh_token }
+      yield* writeSpotifyConfig(configPath, credentials)
+      return credentials
+    })
+
+    return AuthService.of({ refresh, authorize })
   }).pipe(Effect.provide(CurlRunnerLive))
 )
+
+const openBrowser = (url: string) => {
+  const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open"
+  Bun.spawn({ cmd: [command, url], stdout: "ignore", stderr: "ignore" })
+}
+
+const waitForAuthorizationCode = (input: {
+  readonly clientId: string
+  readonly pair: PkcePair
+  readonly state: string
+}) =>
+  Effect.tryPromise({
+    try: async () => {
+      let server: ReturnType<typeof Bun.serve> | undefined
+      let settle: ((value: { readonly code: string; readonly redirectUri: string }) => void) | undefined
+      let reject: ((reason: unknown) => void) | undefined
+      const result = new Promise<{ readonly code: string; readonly redirectUri: string }>((resolve, fail) => {
+        settle = resolve
+        reject = fail
+      })
+
+      server = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        fetch(request) {
+          const url = new URL(request.url)
+          const redirectUri = `http://127.0.0.1:${server?.port}/callback`
+          if (url.pathname !== "/callback") return new Response("Not found", { status: 404 })
+          if (url.searchParams.get("state") !== input.state) {
+            reject?.(new Error("OAuth state did not match."))
+            return new Response("State mismatch. You can close this window.", { status: 400 })
+          }
+          const error = url.searchParams.get("error")
+          if (error) {
+            reject?.(new Error(`Spotify authorization failed: ${error}`))
+            return new Response("Authorization failed. You can close this window.", { status: 400 })
+          }
+          const code = url.searchParams.get("code")
+          if (!code) {
+            reject?.(new Error("Spotify authorization did not return a code."))
+            return new Response("Missing authorization code. You can close this window.", { status: 400 })
+          }
+          settle?.({ code, redirectUri })
+          return new Response("SpotUI authorization complete. You can close this window.")
+        },
+      })
+
+      const redirectUri = `http://127.0.0.1:${server.port}/callback`
+      openBrowser(
+        buildAuthorizationUrl({
+          clientId: input.clientId,
+          redirectUri,
+          state: input.state,
+          challenge: input.pair.challenge,
+        })
+      )
+
+      try {
+        return await Promise.race([
+          result,
+          new Promise<never>((_, fail) =>
+            globalThis.setTimeout(() => fail(new Error("Spotify authorization timed out.")), 300_000)
+          ),
+        ])
+      } finally {
+        server.stop()
+      }
+    },
+    catch: (cause) =>
+      new AuthError({
+        message: "Spotify authorization could not be completed.",
+        cause,
+      }),
+  })
 
 export const writeSpotifyConfig = (path: string, credentials: SpotifyCredentials) =>
   Effect.tryPromise({
