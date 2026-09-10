@@ -12,6 +12,10 @@ describe("navigation commands", () => {
       "open",
       "refresh",
       "load-more",
+      "toggle-play",
+      "next-track",
+      "previous-track",
+      "stop",
       "quit",
     ])
   })
@@ -34,11 +38,34 @@ describe("navigation commands", () => {
       loadMore: async () => {
         calls.push("load-more")
       },
+      togglePlayback: async () => {
+        calls.push("toggle-play")
+      },
+      nextTrack: async () => {
+        calls.push("next-track")
+      },
+      previousTrack: async () => {
+        calls.push("previous-track")
+      },
+      stopPlayback: async () => {
+        calls.push("stop")
+      },
     }
 
     await dispatchCommand(bridge, "go-saved-albums")
     await dispatchCommand(bridge, "refresh")
+    await dispatchCommand(bridge, "toggle-play")
+    await dispatchCommand(bridge, "next-track")
+    await dispatchCommand(bridge, "previous-track")
+    await dispatchCommand(bridge, "stop")
 
-    expect(calls).toEqual(["saved-albums", "refresh"])
+    expect(calls).toEqual([
+      "saved-albums",
+      "refresh",
+      "toggle-play",
+      "next-track",
+      "previous-track",
+      "stop",
+    ])
   })
 })

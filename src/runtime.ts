@@ -1,6 +1,7 @@
 import { Effect } from "effect"
 
 import { AuthService, AuthServiceLive, writeSpotifyConfig } from "./auth"
+import { createLibrespotHost } from "./player"
 import type { SpotifyCredentials } from "./config"
 import { SpotifyBridge } from "./bridge"
 import { CurlProcessError } from "./curl"
@@ -41,7 +42,14 @@ export const createLiveBridge = (credentials: SpotifyCredentials, configPath?: s
         runApi((api) => api.listSavedAlbums(token, continuation)),
       listFollowedArtists: (token, continuation) =>
         runApi((api) => api.listFollowedArtists(token, continuation)),
+      listDevices: (token) => runApi((api) => api.listDevices(token)),
+      play: (token, input) => runApi((api) => api.play(token, input)),
+      pause: (token, deviceId) => runApi((api) => api.pause(token, deviceId)),
+      next: (token, deviceId) => runApi((api) => api.next(token, deviceId)),
+      previous: (token, deviceId) =>
+        runApi((api) => api.previous(token, deviceId)),
     },
+    player: createLibrespotHost(),
   })
 }
 

@@ -9,6 +9,10 @@ export type CommandId =
   | "open"
   | "refresh"
   | "load-more"
+  | "toggle-play"
+  | "next-track"
+  | "previous-track"
+  | "stop"
   | "quit"
 
 export interface CommandDefinition {
@@ -26,6 +30,10 @@ export const commandDefinitions: readonly CommandDefinition[] = [
   { id: "open", title: "Open selected item", shortcut: "enter" },
   { id: "refresh", title: "Refresh current view", shortcut: "r" },
   { id: "load-more", title: "Load more", shortcut: "n" },
+  { id: "toggle-play", title: "Play / pause", shortcut: "space" },
+  { id: "next-track", title: "Next track", shortcut: "ctrl+right" },
+  { id: "previous-track", title: "Previous track", shortcut: "ctrl+left" },
+  { id: "stop", title: "Stop playback", shortcut: "s" },
   { id: "quit", title: "Quit", shortcut: "q" },
 ]
 
@@ -42,6 +50,10 @@ export interface CommandBridge {
   readonly openSelected: () => Promise<void>
   readonly refresh: () => Promise<void>
   readonly loadMore: () => Promise<void>
+  readonly togglePlayback: () => Promise<void>
+  readonly nextTrack: () => Promise<void>
+  readonly previousTrack: () => Promise<void>
+  readonly stopPlayback: () => Promise<void>
 }
 
 export const dispatchCommand = async (bridge: CommandBridge, id: CommandId) => {
@@ -51,5 +63,9 @@ export const dispatchCommand = async (bridge: CommandBridge, id: CommandId) => {
   if (id === "open") return bridge.openSelected()
   if (id === "refresh") return bridge.refresh()
   if (id === "load-more") return bridge.loadMore()
+  if (id === "toggle-play") return bridge.togglePlayback()
+  if (id === "next-track") return bridge.nextTrack()
+  if (id === "previous-track") return bridge.previousTrack()
+  if (id === "stop") return bridge.stopPlayback()
   if (id === "quit") return process.exit(0)
 }

@@ -72,3 +72,10 @@ export type LibraryCollection =
   | "saved-tracks"
   | "saved-albums"
   | "followed-artists"
+
+export interface Device {
+  readonly kind: "device"
+  readonly id: string
+  readonly name: string
+  readonly isActive: boolean
+}

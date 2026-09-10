@@ -57,4 +57,36 @@ describe("curl command construction", () => {
       "https://accounts.spotify.com/api/token",
     ])
   })
+
+  test("encodes a PUT JSON body as a curl data argument", () => {
+    expect(
+      buildCurlArgs({
+        method: "PUT",
+        url: "https://api.spotify.com/v1/me/player/play?device_id=spotui-local",
+        headers: {
+          Accept: "application/json",
+          Authorization: "Bearer runtime-token",
+        },
+        json: { context_uri: "spotify:playlist:abc" },
+      })
+    ).toEqual([
+      "curl",
+      "--fail-with-body",
+      "--silent",
+      "--show-error",
+      "--request",
+      "PUT",
+      "--header",
+      "Accept: application/json",
+      "--header",
+      "Authorization: Bearer runtime-token",
+      "--header",
+      "Content-Type: application/json",
+      "--data",
+      '{"context_uri":"spotify:playlist:abc"}',
+      "--write-out",
+      "\\n%{http_code}",
+      "https://api.spotify.com/v1/me/player/play?device_id=spotui-local",
+    ])
+  })
 })

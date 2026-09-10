@@ -3,6 +3,7 @@ import type { SpotifyCredentials } from "./config"
 import type { BearerToken } from "./auth"
 import type { Continuation, LibraryCollection, Page, PlaylistItem, PlaylistSummary, Track, Album, Artist } from "./domain"
 import type { SpotifyApiShape } from "./spotifyApi"
+import type { PlaybackEvent, PlaybackHandle, PlaybackHost } from "./player"
 
 export type CollectionStatus = "idle" | "loading" | "refreshing" | "ready" | "error"
 
@@ -95,6 +96,21 @@ export type BridgeCollection =
   | Artist
   | PlaylistItem
 
+export type PlaybackStatus = "idle" | "loading" | "playing" | "paused" | "error"
+
+export interface NowPlaying {
+  readonly uri: string | null
+  readonly title: string | null
+  readonly artist: string | null
+}
+
+export interface PlaybackState {
+  readonly status: PlaybackStatus
+  readonly track: NowPlaying | null
+  readonly error: string | null
+  readonly output: "local" | "none"
+}
+
 export interface BridgeSnapshot {
   readonly auth: "loading" | "login" | "ready" | "error"
   readonly authError: string | null
@@ -102,6 +118,7 @@ export interface BridgeSnapshot {
   readonly selectedIndex: number
   readonly playlistId: string | null
   readonly playlistItems: CollectionState<PlaylistItem> | null
+  readonly playback: PlaybackState
   readonly collections: {
     readonly playlists: CollectionState<PlaylistSummary>
     readonly "saved-tracks": CollectionState<Track>
@@ -117,6 +134,9 @@ export interface BridgeDependencies {
   ) => Promise<BearerToken>
   readonly persistCredentials?: (credentials: SpotifyCredentials) => Promise<void>
   readonly api: SpotifyApiShape
+  readonly player: PlaybackHost
+  readonly deviceName?: string
+  readonly deviceId?: string
 }
 
 const initialSnapshot = (): BridgeSnapshot => ({
@@ -126,6 +146,12 @@ const initialSnapshot = (): BridgeSnapshot => ({
   selectedIndex: 0,
   playlistId: null,
   playlistItems: null,
+  playback: {
+    status: "idle",
+    track: null,
+    error: null,
+    output: "local",
+  },
   collections: {
     playlists: initialCollectionState(),
     "saved-tracks": initialCollectionState(),
@@ -141,6 +167,7 @@ export class SpotifyBridge {
   private tokenRefresh: Promise<BearerToken> | null = null
   private generation = 0
   private viewGeneration = 0
+  private playbackHandle: PlaybackHandle | null = null
   private credentials: SpotifyCredentials
 
   constructor(private readonly dependencies: BridgeDependencies) {
@@ -235,25 +262,203 @@ export class SpotifyBridge {
 
   openSelected = async () => {
     const current = this.snapshot
-    if (current.activeCollection !== "playlists" || current.playlistId !== null) return
-    const playlist = current.collections.playlists.items[current.selectedIndex]
-    if (!playlist) return
-    const generation = ++this.generation
-    const viewGeneration = this.viewGeneration
-    this.update((state) => ({ ...state, playlistId: playlist.id, playlistItems: beginCollectionLoad(initialCollectionState(), generation) }))
+    if (current.playlistId === null && current.activeCollection === "playlists") {
+      const playlist = current.collections.playlists.items[current.selectedIndex]
+      if (playlist) {
+        const generation = ++this.generation
+        const viewGeneration = this.viewGeneration
+        this.update((state) => ({ ...state, playlistId: playlist.id, playlistItems: beginCollectionLoad(initialCollectionState(), generation) }))
+        try {
+          const page = await this.runApi((api, token) => api.listPlaylistItems(token, playlist.id))
+          this.update((state) =>
+            this.viewGeneration === viewGeneration && state.playlistId === playlist.id && state.playlistItems
+              ? { ...state, playlistItems: completeCollectionLoad(state.playlistItems, generation, page) }
+              : state
+          )
+        } catch (error) {
+          this.update((state) =>
+            this.viewGeneration === viewGeneration && state.playlistId === playlist.id && state.playlistItems
+              ? { ...state, playlistItems: failCollectionLoad(state.playlistItems, generation, String(error)) }
+              : state
+          )
+        }
+        return
+      }
+    }
+    await this.playSelected()
+  }
+
+  private playbackDeviceId = () => this.dependencies.deviceId ?? "spotui-local"
+
+  private playbackDeviceName = () => this.dependencies.deviceName ?? "SpotUI"
+
+  private updatePlayback = (patch: Partial<PlaybackState>) =>
+    this.update((current) => ({
+      ...current,
+      playback: { ...current.playback, ...patch },
+    }))
+
+  private ensurePlaybackDevice = async () => {
+    const deviceId = this.playbackDeviceId()
+    if (!this.playbackHandle) {
+      const token = await this.accessToken()
+      const handle = await this.dependencies.player.start({
+        accessToken: token,
+        clientId: this.credentials.clientId,
+        deviceName: this.playbackDeviceName(),
+        deviceId,
+      })
+      this.playbackHandle = handle
+      handle.subscribe(this.handlePlaybackEvent)
+      if (handle.output === "none") {
+        this.updatePlayback({
+          error: "No local PCM player found (install pacat or aplay); audio will be silent.",
+        })
+      }
+    }
+    return deviceId
+  }
+
+  private playableTarget = (
+    current: BridgeSnapshot
+  ): { contextUri?: string; uris?: string[] } | null => {
+    if (current.playlistId !== null && current.playlistItems) {
+      const item = current.playlistItems.items[current.selectedIndex]
+      if (item?.kind === "track" && item.uri) return { uris: [item.uri] }
+      return null
+    }
+    const item = current.collections[current.activeCollection].items[current.selectedIndex]
+    if (!item) return null
+    if (item.kind === "track" && "uri" in item && item.uri) return { uris: [item.uri] }
+    if (item.kind === "playlist") return { contextUri: `spotify:playlist:${item.id}` }
+    if (item.kind === "album" && item.id) return { contextUri: `spotify:album:${item.id}` }
+    return null
+  }
+
+  playSelected = async () => {
+    if (this.snapshot.auth !== "ready") return
+    const body = this.playableTarget(this.snapshot)
+    if (!body) {
+      this.updatePlayback({
+        status: "error",
+        error: "The selected item cannot be played from here.",
+      })
+      return
+    }
     try {
-      const page = await this.runApi((api, token) => api.listPlaylistItems(token, playlist.id))
-      this.update((state) =>
-        this.viewGeneration === viewGeneration && state.playlistId === playlist.id && state.playlistItems
-          ? { ...state, playlistItems: completeCollectionLoad(state.playlistItems, generation, page) }
-          : state
+      const deviceId = await this.ensurePlaybackDevice()
+      this.updatePlayback({ status: "loading", error: null })
+      await this.runApi((api, token) =>
+        api.play(token, { deviceId, ...body })
       )
     } catch (error) {
-      this.update((state) =>
-        this.viewGeneration === viewGeneration && state.playlistId === playlist.id && state.playlistItems
-          ? { ...state, playlistItems: failCollectionLoad(state.playlistItems, generation, String(error)) }
-          : state
+      this.playbackHandle = null
+      this.updatePlayback({
+        status: "error",
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  pausePlayback = async () => {
+    try {
+      await this.runApi((api, token) =>
+        api.pause(token, this.playbackDeviceId())
       )
+      this.updatePlayback({ status: "paused" })
+    } catch (error) {
+      this.updatePlayback({
+        status: "error",
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  resumePlayback = async () => {
+    try {
+      const deviceId = await this.ensurePlaybackDevice()
+      await this.runApi((api, token) => api.play(token, { deviceId }))
+    } catch (error) {
+      this.playbackHandle = null
+      this.updatePlayback({
+        status: "error",
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  togglePlayback = async () => {
+    if (this.snapshot.playback.status === "playing") return this.pausePlayback()
+    if (this.snapshot.playback.status === "paused") return this.resumePlayback()
+    return this.playSelected()
+  }
+
+  stopPlayback = async () => {
+    try {
+      await this.runApi((api, token) =>
+        api.pause(token, this.playbackDeviceId())
+      )
+    } catch (error) {
+      void error
+    }
+    this.updatePlayback({ status: "idle", track: null, error: null })
+  }
+
+  nextTrack = async () => {
+    try {
+      const deviceId = await this.ensurePlaybackDevice()
+      await this.runApi((api, token) => api.next(token, deviceId))
+    } catch (error) {
+      this.playbackHandle = null
+      this.updatePlayback({
+        status: "error",
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  previousTrack = async () => {
+    try {
+      const deviceId = await this.ensurePlaybackDevice()
+      await this.runApi((api, token) => api.previous(token, deviceId))
+    } catch (error) {
+      this.playbackHandle = null
+      this.updatePlayback({
+        status: "error",
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  private handlePlaybackEvent = (event: PlaybackEvent) => {
+    const nowPlaying = {
+      uri: event.uri,
+      title: event.title,
+      artist: event.artist,
+    }
+    switch (event.type) {
+      case "loading":
+        this.updatePlayback({ status: "loading", error: null, track: nowPlaying })
+        return
+      case "playing":
+        this.updatePlayback({ status: "playing", error: null, track: nowPlaying })
+        return
+      case "paused":
+        this.updatePlayback({ status: "paused", track: nowPlaying })
+        return
+      case "stopped":
+        this.updatePlayback({ status: "idle", error: null })
+        return
+      case "end_of_track":
+        this.updatePlayback({ status: "idle" })
+        return
+      case "error":
+        this.playbackHandle = null
+        this.updatePlayback({
+          status: "error",
+          error: event.message ?? "Playback failed.",
+          track: nowPlaying,
+        })
     }
   }
 

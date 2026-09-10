@@ -65,6 +65,16 @@ export const RawFollowingPageSchema = Schema.Struct({
   }),
 })
 
+export const RawDeviceSchema = Schema.Struct({
+  id: Schema.optionalKey(NullableString),
+  name: Schema.String,
+  is_active: Schema.optionalKey(Schema.Boolean),
+})
+
+export const RawDevicesSchema = Schema.Struct({
+  devices: Schema.Array(RawDeviceSchema),
+})
+
 export const RawPlaylistsResponseSchema = Schema.Struct({
   items: Schema.Array(RawPlaylistSchema),
   limit: Schema.Number,
@@ -102,3 +112,4 @@ export type RawAlbum = Schema.Schema.Type<typeof RawAlbumSchema>
 export type RawTrack = Schema.Schema.Type<typeof RawTrackSchema>
 export type RawPlaylist = Schema.Schema.Type<typeof RawPlaylistSchema>
 export type RawPlaylistItem = Schema.Schema.Type<typeof RawPlaylistItemSchema>
+export type RawDevice = Schema.Schema.Type<typeof RawDeviceSchema>

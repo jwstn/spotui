@@ -1,6 +1,7 @@
 import type {
   Album,
   Artist,
+  Device,
   EpisodeItem,
   Page,
   PlaylistItem,
@@ -10,6 +11,7 @@ import type {
 import type {
   RawAlbum,
   RawArtist,
+  RawDevice,
   RawPlaylist,
   RawPlaylistItem,
   RawTrack,
@@ -50,6 +52,12 @@ export const normalizePlaylist = (raw: RawPlaylist): PlaylistSummary => ({
   imageUrl: firstImage(raw.images),
   itemCount: raw.tracks?.total ?? null,
 })
+
+export const normalizeDevice = (raw: RawDevice): Device | null => {
+  const id = raw.id
+  if (!id) return null
+  return { kind: "device", id, name: raw.name, isActive: raw.is_active ?? false }
+}
 
 export const normalizePlaylistItem = (
   raw: RawPlaylistItem,

@@ -8,10 +8,12 @@ import type {
   Track,
   Album,
   Artist,
+  Device,
 } from "./domain"
 import { CurlProcessError, CurlRunner, CurlRunnerLive } from "./curl"
 import {
   RawAlbumSchema,
+  RawDevicesSchema,
   RawFollowingPageSchema,
   RawPlaylistItemsResponseSchema,
   RawPlaylistsResponseSchema,
@@ -22,6 +24,7 @@ import {
 import {
   normalizeAlbum,
   normalizeArtist,
+  normalizeDevice,
   normalizePlaylist,
   normalizePlaylistItem,
   normalizeTrack,
@@ -62,6 +65,29 @@ export interface SpotifyApiShape {
     token: string,
     continuation?: Continuation | null
   ) => Effect.Effect<Page<Artist>, SpotifyApiError | CurlProcessError>
+  readonly listDevices: (
+    token: string
+  ) => Effect.Effect<readonly Device[], SpotifyApiError | CurlProcessError>
+  readonly play: (
+    token: string,
+    input: {
+      readonly deviceId: string
+      readonly contextUri?: string
+      readonly uris?: readonly string[]
+    }
+  ) => Effect.Effect<void, SpotifyApiError | CurlProcessError>
+  readonly pause: (
+    token: string,
+    deviceId: string
+  ) => Effect.Effect<void, SpotifyApiError | CurlProcessError>
+  readonly next: (
+    token: string,
+    deviceId: string
+  ) => Effect.Effect<void, SpotifyApiError | CurlProcessError>
+  readonly previous: (
+    token: string,
+    deviceId: string
+  ) => Effect.Effect<void, SpotifyApiError | CurlProcessError>
 }
 
 export class SpotifyApi extends Context.Service<SpotifyApi, SpotifyApiShape>()(
@@ -96,6 +122,11 @@ const get = (token: string, url: string) => ({
     Accept: "application/json",
     Authorization: `Bearer ${token}`,
   },
+})
+
+const bearer = (token: string) => ({
+  Accept: "application/json",
+  Authorization: `Bearer ${token}`,
 })
 
 export const SpotifyApiLive = Layer.effect(
@@ -271,12 +302,118 @@ export const SpotifyApiLive = Layer.effect(
         )
     })
 
+    const listDevices = Effect.fn("SpotifyApi/listDevices")((token: string) =>
+      curl
+        .runJson(
+          RawDevicesSchema,
+          get(token, `${API_BASE}/me/player/devices`)
+        )
+        .pipe(
+          Effect.map((response) =>
+            response.devices.flatMap((device) => {
+              const normalized = normalizeDevice(device)
+              return normalized ? [normalized] : []
+            })
+          ),
+          Effect.mapError(
+            (cause) =>
+              new SpotifyApiError({
+                message: "Could not load playback devices.",
+                cause,
+                statusCode:
+                  cause instanceof CurlProcessError ? cause.statusCode : null,
+              })
+          )
+        )
+    )
+
+    const controlPlayer = Effect.fn("SpotifyApi/controlPlayer")(
+      (input: {
+        readonly token: string
+        readonly url: string
+        readonly method: "PUT" | "POST"
+        readonly json?: unknown
+      }) =>
+        curl
+          .run({
+            method: input.method,
+            url: input.url,
+            headers: bearer(input.token),
+            ...(input.json !== undefined ? { json: input.json } : {}),
+          })
+          .pipe(
+            Effect.map(() => undefined),
+            Effect.mapError(
+              (cause) =>
+                new SpotifyApiError({
+                  message: "Spotify could not be controlled.",
+                  cause,
+                  statusCode:
+                    cause instanceof CurlProcessError ? cause.statusCode : null,
+                })
+            )
+          )
+    )
+
+    const play = Effect.fn("SpotifyApi/play")(
+      (token: string, input: {
+        readonly deviceId: string
+        readonly contextUri?: string
+        readonly uris?: readonly string[]
+      }) => {
+        const body =
+          input.contextUri !== undefined
+            ? { context_uri: input.contextUri }
+            : input.uris !== undefined && input.uris.length > 0
+              ? { uris: [...input.uris] }
+              : undefined
+        return controlPlayer({
+          token,
+          method: "PUT",
+          url: `${API_BASE}/me/player/play${query({ device_id: input.deviceId })}`,
+          ...(body !== undefined ? { json: body } : {}),
+        })
+      }
+    )
+
+    const pause = Effect.fn("SpotifyApi/pause")(
+      (token: string, deviceId: string) =>
+        controlPlayer({
+          token,
+          method: "PUT",
+          url: `${API_BASE}/me/player/pause${query({ device_id: deviceId })}`,
+        })
+    )
+
+    const next = Effect.fn("SpotifyApi/next")(
+      (token: string, deviceId: string) =>
+        controlPlayer({
+          token,
+          method: "POST",
+          url: `${API_BASE}/me/player/next${query({ device_id: deviceId })}`,
+        })
+    )
+
+    const previous = Effect.fn("SpotifyApi/previous")(
+      (token: string, deviceId: string) =>
+        controlPlayer({
+          token,
+          method: "POST",
+          url: `${API_BASE}/me/player/previous${query({ device_id: deviceId })}`,
+        })
+    )
+
     return SpotifyApi.of({
       listPlaylists,
       listPlaylistItems,
       listSavedTracks,
       listSavedAlbums,
       listFollowedArtists,
+      listDevices,
+      play,
+      pause,
+      next,
+      previous,
     })
   }).pipe(Effect.provide(CurlRunnerLive))
 )

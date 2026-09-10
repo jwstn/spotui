@@ -16,6 +16,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@lox-audioserver/node-librespot": "^0.5.1",
     "@opentui/core": "^0.5.10",
     "@opentui/react": "^0.5.10",
     "effect": "^4.0.0-rc.112",

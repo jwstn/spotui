@@ -12,6 +12,10 @@ export const USER_SCOPES = [
   "playlist-read-collaborative",
   "user-library-read",
   "user-follow-read",
+  "streaming",
+  "user-read-playback-state",
+  "user-modify-playback-state",
+  "user-read-currently-playing",
 ] as const
 
 export interface PkcePair {
