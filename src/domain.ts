@@ -62,20 +62,7 @@ export interface UnavailableItem {
 }
 
 export type PlaylistItem =
-  | (Track & { readonly key: string })
-  | EpisodeItem
-  | LocalItem
-  | UnavailableItem
+  (Track & { readonly key: string }) | EpisodeItem | LocalItem | UnavailableItem
 
 export type LibraryCollection =
-  | "playlists"
-  | "saved-tracks"
-  | "saved-albums"
-  | "followed-artists"
-
-export interface Device {
-  readonly kind: "device"
-  readonly id: string
-  readonly name: string
-  readonly isActive: boolean
-}
+  "playlists" | "saved-tracks" | "saved-albums" | "followed-artists"

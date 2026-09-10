@@ -1,6 +1,9 @@
 # dependencies (bun install)
 node_modules
 
+ghui
+cliamp
+
 # output
 out
 dist

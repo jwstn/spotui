@@ -1,11 +1,21 @@
 import { DateTime, Effect } from "effect"
 import type { SpotifyCredentials } from "./config"
 import type { BearerToken } from "./auth"
-import type { Continuation, LibraryCollection, Page, PlaylistItem, PlaylistSummary, Track, Album, Artist } from "./domain"
+import type {
+  Continuation,
+  LibraryCollection,
+  Page,
+  PlaylistItem,
+  PlaylistSummary,
+  Track,
+  Album,
+  Artist,
+} from "./domain"
 import type { SpotifyApiShape } from "./spotifyApi"
 import type { PlaybackEvent, PlaybackHandle, PlaybackHost } from "./player"
 
-export type CollectionStatus = "idle" | "loading" | "refreshing" | "ready" | "error"
+export type CollectionStatus =
+  "idle" | "loading" | "refreshing" | "ready" | "error"
 
 export interface CollectionState<T> {
   readonly status: CollectionStatus
@@ -90,11 +100,7 @@ export const failLoadMore = <T>(state: CollectionState<T>, error: string) => ({
 })
 
 export type BridgeCollection =
-  | PlaylistSummary
-  | Track
-  | Album
-  | Artist
-  | PlaylistItem
+  PlaylistSummary | Track | Album | Artist | PlaylistItem
 
 export type PlaybackStatus = "idle" | "loading" | "playing" | "paused" | "error"
 
@@ -132,11 +138,11 @@ export interface BridgeDependencies {
   readonly refreshToken: (
     credentials: SpotifyCredentials
   ) => Promise<BearerToken>
-  readonly persistCredentials?: (credentials: SpotifyCredentials) => Promise<void>
+  readonly persistCredentials?: (
+    credentials: SpotifyCredentials
+  ) => Promise<void>
   readonly api: SpotifyApiShape
   readonly player: PlaybackHost
-  readonly deviceName?: string
-  readonly deviceId?: string
 }
 
 const initialSnapshot = (): BridgeSnapshot => ({
@@ -189,20 +195,31 @@ export class SpotifyBridge {
   }
 
   private accessToken = async () => {
-    if (this.token && this.token.expiresAt > DateTime.nowUnsafe().epochMilliseconds + 30_000) return this.token.accessToken
+    if (
+      this.token &&
+      this.token.expiresAt > DateTime.nowUnsafe().epochMilliseconds + 30_000
+    )
+      return this.token.accessToken
     if (!this.tokenRefresh) {
-      this.tokenRefresh = this.dependencies.refreshToken(this.credentials).finally(() => {
-        this.tokenRefresh = null
-      })
+      this.tokenRefresh = this.dependencies
+        .refreshToken(this.credentials)
+        .finally(() => {
+          this.tokenRefresh = null
+        })
     }
     const nextToken = await this.tokenRefresh
-    if (nextToken.refreshToken && nextToken.refreshToken !== this.credentials.refreshToken) {
+    if (
+      nextToken.refreshToken &&
+      nextToken.refreshToken !== this.credentials.refreshToken
+    ) {
       const nextCredentials = {
         ...this.credentials,
         refreshToken: nextToken.refreshToken,
       }
       this.credentials = nextCredentials
-      await this.dependencies.persistCredentials?.(nextCredentials).catch(() => undefined)
+      await this.dependencies
+        .persistCredentials?.(nextCredentials)
+        .catch(() => undefined)
     }
     this.token = nextToken
     return this.token.accessToken
@@ -243,8 +260,13 @@ export class SpotifyBridge {
 
   moveSelection = (delta: -1 | 1) =>
     this.update((current) => {
-      const items = current.playlistItems?.items ?? current.collections[current.activeCollection].items
-      const next = items.length === 0 ? 0 : (current.selectedIndex + delta + items.length) % items.length
+      const items =
+        current.playlistItems?.items ??
+        current.collections[current.activeCollection].items
+      const next =
+        items.length === 0
+          ? 0
+          : (current.selectedIndex + delta + items.length) % items.length
       return { ...current, selectedIndex: next }
     })
 
@@ -262,23 +284,54 @@ export class SpotifyBridge {
 
   openSelected = async () => {
     const current = this.snapshot
-    if (current.playlistId === null && current.activeCollection === "playlists") {
-      const playlist = current.collections.playlists.items[current.selectedIndex]
+    if (
+      current.playlistId === null &&
+      current.activeCollection === "playlists"
+    ) {
+      const playlist =
+        current.collections.playlists.items[current.selectedIndex]
       if (playlist) {
         const generation = ++this.generation
         const viewGeneration = this.viewGeneration
-        this.update((state) => ({ ...state, playlistId: playlist.id, playlistItems: beginCollectionLoad(initialCollectionState(), generation) }))
+        this.update((state) => ({
+          ...state,
+          playlistId: playlist.id,
+          playlistItems: beginCollectionLoad(
+            initialCollectionState(),
+            generation
+          ),
+        }))
         try {
-          const page = await this.runApi((api, token) => api.listPlaylistItems(token, playlist.id))
+          const page = await this.runApi((api, token) =>
+            api.listPlaylistItems(token, playlist.id)
+          )
           this.update((state) =>
-            this.viewGeneration === viewGeneration && state.playlistId === playlist.id && state.playlistItems
-              ? { ...state, playlistItems: completeCollectionLoad(state.playlistItems, generation, page) }
+            this.viewGeneration === viewGeneration &&
+            state.playlistId === playlist.id &&
+            state.playlistItems
+              ? {
+                  ...state,
+                  playlistItems: completeCollectionLoad(
+                    state.playlistItems,
+                    generation,
+                    page
+                  ),
+                }
               : state
           )
         } catch (error) {
           this.update((state) =>
-            this.viewGeneration === viewGeneration && state.playlistId === playlist.id && state.playlistItems
-              ? { ...state, playlistItems: failCollectionLoad(state.playlistItems, generation, String(error)) }
+            this.viewGeneration === viewGeneration &&
+            state.playlistId === playlist.id &&
+            state.playlistItems
+              ? {
+                  ...state,
+                  playlistItems: failCollectionLoad(
+                    state.playlistItems,
+                    generation,
+                    String(error)
+                  ),
+                }
               : state
           )
         }
@@ -288,57 +341,76 @@ export class SpotifyBridge {
     await this.playSelected()
   }
 
-  private playbackDeviceId = () => this.dependencies.deviceId ?? "spotui-local"
-
-  private playbackDeviceName = () => this.dependencies.deviceName ?? "SpotUI"
-
   private updatePlayback = (patch: Partial<PlaybackState>) =>
     this.update((current) => ({
       ...current,
       playback: { ...current.playback, ...patch },
     }))
 
-  private ensurePlaybackDevice = async () => {
-    const deviceId = this.playbackDeviceId()
+  private ensurePlaybackHost = async () => {
     if (!this.playbackHandle) {
-      const token = await this.accessToken()
-      const handle = await this.dependencies.player.start({
-        accessToken: token,
-        clientId: this.credentials.clientId,
-        deviceName: this.playbackDeviceName(),
-        deviceId,
-      })
+      const handle = await this.dependencies.player.start()
       this.playbackHandle = handle
       handle.subscribe(this.handlePlaybackEvent)
       if (handle.output === "none") {
         this.updatePlayback({
-          error: "No local PCM player found (install pacat or aplay); audio will be silent.",
+          error:
+            "No local PCM player found (install pacat or aplay); audio will be silent.",
         })
       }
     }
-    return deviceId
+    return this.playbackHandle
   }
 
-  private playableTarget = (
-    current: BridgeSnapshot
-  ): { contextUri?: string; uris?: string[] } | null => {
-    if (current.playlistId !== null && current.playlistItems) {
-      const item = current.playlistItems.items[current.selectedIndex]
-      if (item?.kind === "track" && item.uri) return { uris: [item.uri] }
-      return null
+  private resolveAlbumUris = async (albumId: string): Promise<string[]> => {
+    const uris: string[] = []
+    let continuation: Continuation | null = null
+    while (true) {
+      const page = await this.runApi((api, token) =>
+        api.listAlbumTracks(token, albumId, continuation)
+      )
+      for (const track of page.items) {
+        if (track.id && track.uri) uris.push(track.uri)
+      }
+      if (page.continuation === null) return uris
+      continuation = page.continuation
+      if (uris.length >= 200) return uris
     }
-    const item = current.collections[current.activeCollection].items[current.selectedIndex]
-    if (!item) return null
-    if (item.kind === "track" && "uri" in item && item.uri) return { uris: [item.uri] }
-    if (item.kind === "playlist") return { contextUri: `spotify:playlist:${item.id}` }
-    if (item.kind === "album" && item.id) return { contextUri: `spotify:album:${item.id}` }
-    return null
   }
 
   playSelected = async () => {
     if (this.snapshot.auth !== "ready") return
-    const body = this.playableTarget(this.snapshot)
-    if (!body) {
+    const current = this.snapshot
+    let uris: string[] | null = null
+    if (current.playlistId !== null && current.playlistItems) {
+      const item = current.playlistItems.items[current.selectedIndex]
+      if (item?.kind === "track" && item.uri) uris = [item.uri]
+    } else {
+      const item =
+        current.collections[current.activeCollection].items[
+          current.selectedIndex
+        ]
+      if (item?.kind === "track" && "uri" in item && item.uri) uris = [item.uri]
+      else if (item?.kind === "album" && item.id) {
+        try {
+          uris = await this.resolveAlbumUris(item.id)
+        } catch (error) {
+          this.updatePlayback({
+            status: "error",
+            error: error instanceof Error ? error.message : String(error),
+          })
+          return
+        }
+      } else if (item?.kind === "playlist") {
+        this.updatePlayback({
+          status: "error",
+          error:
+            "Open the playlist first, then press enter on one of its tracks.",
+        })
+        return
+      }
+    }
+    if (!uris || uris.length === 0) {
       this.updatePlayback({
         status: "error",
         error: "The selected item cannot be played from here.",
@@ -346,11 +418,9 @@ export class SpotifyBridge {
       return
     }
     try {
-      const deviceId = await this.ensurePlaybackDevice()
+      await this.ensurePlaybackHost()
       this.updatePlayback({ status: "loading", error: null })
-      await this.runApi((api, token) =>
-        api.play(token, { deviceId, ...body })
-      )
+      await this.playbackHandle!.play({ uris })
     } catch (error) {
       this.playbackHandle = null
       this.updatePlayback({
@@ -362,11 +432,10 @@ export class SpotifyBridge {
 
   pausePlayback = async () => {
     try {
-      await this.runApi((api, token) =>
-        api.pause(token, this.playbackDeviceId())
-      )
-      this.updatePlayback({ status: "paused" })
+      await this.ensurePlaybackHost()
+      await this.playbackHandle!.pause()
     } catch (error) {
+      this.playbackHandle = null
       this.updatePlayback({
         status: "error",
         error: error instanceof Error ? error.message : String(error),
@@ -376,8 +445,8 @@ export class SpotifyBridge {
 
   resumePlayback = async () => {
     try {
-      const deviceId = await this.ensurePlaybackDevice()
-      await this.runApi((api, token) => api.play(token, { deviceId }))
+      await this.ensurePlaybackHost()
+      await this.playbackHandle!.resume()
     } catch (error) {
       this.playbackHandle = null
       this.updatePlayback({
@@ -395,9 +464,9 @@ export class SpotifyBridge {
 
   stopPlayback = async () => {
     try {
-      await this.runApi((api, token) =>
-        api.pause(token, this.playbackDeviceId())
-      )
+      if (this.playbackHandle) {
+        await this.playbackHandle.stop()
+      }
     } catch (error) {
       void error
     }
@@ -406,8 +475,8 @@ export class SpotifyBridge {
 
   nextTrack = async () => {
     try {
-      const deviceId = await this.ensurePlaybackDevice()
-      await this.runApi((api, token) => api.next(token, deviceId))
+      await this.ensurePlaybackHost()
+      await this.playbackHandle!.next()
     } catch (error) {
       this.playbackHandle = null
       this.updatePlayback({
@@ -419,8 +488,8 @@ export class SpotifyBridge {
 
   previousTrack = async () => {
     try {
-      const deviceId = await this.ensurePlaybackDevice()
-      await this.runApi((api, token) => api.previous(token, deviceId))
+      await this.ensurePlaybackHost()
+      await this.playbackHandle!.previous()
     } catch (error) {
       this.playbackHandle = null
       this.updatePlayback({
@@ -438,10 +507,18 @@ export class SpotifyBridge {
     }
     switch (event.type) {
       case "loading":
-        this.updatePlayback({ status: "loading", error: null, track: nowPlaying })
+        this.updatePlayback({
+          status: "loading",
+          error: null,
+          track: nowPlaying,
+        })
         return
       case "playing":
-        this.updatePlayback({ status: "playing", error: null, track: nowPlaying })
+        this.updatePlayback({
+          status: "playing",
+          error: null,
+          track: nowPlaying,
+        })
         return
       case "paused":
         this.updatePlayback({ status: "paused", track: nowPlaying })
@@ -450,10 +527,8 @@ export class SpotifyBridge {
         this.updatePlayback({ status: "idle", error: null })
         return
       case "end_of_track":
-        this.updatePlayback({ status: "idle" })
         return
       case "error":
-        this.playbackHandle = null
         this.updatePlayback({
           status: "error",
           error: event.message ?? "Playback failed.",
@@ -465,22 +540,42 @@ export class SpotifyBridge {
   loadMore = async () => {
     const current = this.snapshot
     if (current.playlistItems) {
-      if (current.playlistItems.continuation === null || current.playlistItems.loadingMore || current.playlistId === null) return
+      if (
+        current.playlistItems.continuation === null ||
+        current.playlistItems.loadingMore ||
+        current.playlistId === null
+      )
+        return
       const playlistId = current.playlistId
       const continuation = current.playlistItems.continuation
       const viewGeneration = this.viewGeneration
-      this.update((state) => ({ ...state, playlistItems: beginLoadMore(state.playlistItems!) }))
+      this.update((state) => ({
+        ...state,
+        playlistItems: beginLoadMore(state.playlistItems!),
+      }))
       try {
-        const page = await this.runApi((api, token) => api.listPlaylistItems(token, playlistId, continuation))
+        const page = await this.runApi((api, token) =>
+          api.listPlaylistItems(token, playlistId, continuation)
+        )
         this.update((state) =>
-          this.viewGeneration === viewGeneration && state.playlistId === playlistId && state.playlistItems
-            ? { ...state, playlistItems: completeLoadMore(state.playlistItems, page) }
+          this.viewGeneration === viewGeneration &&
+          state.playlistId === playlistId &&
+          state.playlistItems
+            ? {
+                ...state,
+                playlistItems: completeLoadMore(state.playlistItems, page),
+              }
             : state
         )
       } catch (error) {
         this.update((state) =>
-          this.viewGeneration === viewGeneration && state.playlistId === playlistId && state.playlistItems
-            ? { ...state, playlistItems: failLoadMore(state.playlistItems, String(error)) }
+          this.viewGeneration === viewGeneration &&
+          state.playlistId === playlistId &&
+          state.playlistItems
+            ? {
+                ...state,
+                playlistItems: failLoadMore(state.playlistItems, String(error)),
+              }
             : state
         )
       }
@@ -489,12 +584,38 @@ export class SpotifyBridge {
     const collection = current.activeCollection
     const state = current.collections[collection] as CollectionState<any>
     if (state.continuation === null || state.loadingMore) return
-    this.update((snapshot) => ({ ...snapshot, collections: { ...snapshot.collections, [collection]: beginLoadMore(snapshot.collections[collection] as CollectionState<any>) } }))
+    this.update((snapshot) => ({
+      ...snapshot,
+      collections: {
+        ...snapshot.collections,
+        [collection]: beginLoadMore(
+          snapshot.collections[collection] as CollectionState<any>
+        ),
+      },
+    }))
     try {
       const page = await this.runCollectionApi(collection, state.continuation)
-      this.update((snapshot) => ({ ...snapshot, collections: { ...snapshot.collections, [collection]: completeLoadMore(snapshot.collections[collection] as CollectionState<any>, page) } }))
+      this.update((snapshot) => ({
+        ...snapshot,
+        collections: {
+          ...snapshot.collections,
+          [collection]: completeLoadMore(
+            snapshot.collections[collection] as CollectionState<any>,
+            page
+          ),
+        },
+      }))
     } catch (error) {
-      this.update((snapshot) => ({ ...snapshot, collections: { ...snapshot.collections, [collection]: failLoadMore(snapshot.collections[collection] as CollectionState<any>, String(error)) } }))
+      this.update((snapshot) => ({
+        ...snapshot,
+        collections: {
+          ...snapshot.collections,
+          [collection]: failLoadMore(
+            snapshot.collections[collection] as CollectionState<any>,
+            String(error)
+          ),
+        },
+      }))
     }
   }
 
@@ -508,16 +629,36 @@ export class SpotifyBridge {
         playlistItems: beginCollectionLoad(state.playlistItems!, generation),
       }))
       try {
-        const page = await this.runApi((api, token) => api.listPlaylistItems(token, playlistId))
+        const page = await this.runApi((api, token) =>
+          api.listPlaylistItems(token, playlistId)
+        )
         this.update((state) =>
-          this.viewGeneration === viewGeneration && state.playlistId === playlistId && state.playlistItems
-            ? { ...state, playlistItems: completeCollectionLoad(state.playlistItems, generation, page) }
+          this.viewGeneration === viewGeneration &&
+          state.playlistId === playlistId &&
+          state.playlistItems
+            ? {
+                ...state,
+                playlistItems: completeCollectionLoad(
+                  state.playlistItems,
+                  generation,
+                  page
+                ),
+              }
             : state
         )
       } catch (error) {
         this.update((state) =>
-          this.viewGeneration === viewGeneration && state.playlistId === playlistId && state.playlistItems
-            ? { ...state, playlistItems: failCollectionLoad(state.playlistItems, generation, String(error)) }
+          this.viewGeneration === viewGeneration &&
+          state.playlistId === playlistId &&
+          state.playlistItems
+            ? {
+                ...state,
+                playlistItems: failCollectionLoad(
+                  state.playlistItems,
+                  generation,
+                  String(error)
+                ),
+              }
             : state
         )
       }
@@ -534,37 +675,67 @@ export class SpotifyBridge {
       ...snapshot,
       collections: {
         ...snapshot.collections,
-        [collection]: beginCollectionLoad(snapshot.collections[collection] as CollectionState<any>, generation),
+        [collection]: beginCollectionLoad(
+          snapshot.collections[collection] as CollectionState<any>,
+          generation
+        ),
       },
     }))
     try {
       const page = await this.runCollectionApi(collection)
-      this.update((snapshot) => this.viewGeneration === viewGeneration ? {
-        ...snapshot,
-        collections: {
-          ...snapshot.collections,
-          [collection]: completeCollectionLoad(snapshot.collections[collection] as CollectionState<any>, generation, page),
-        },
-      } : snapshot)
+      this.update((snapshot) =>
+        this.viewGeneration === viewGeneration
+          ? {
+              ...snapshot,
+              collections: {
+                ...snapshot.collections,
+                [collection]: completeCollectionLoad(
+                  snapshot.collections[collection] as CollectionState<any>,
+                  generation,
+                  page
+                ),
+              },
+            }
+          : snapshot
+      )
     } catch (error) {
-      this.update((snapshot) => this.viewGeneration === viewGeneration ? {
-        ...snapshot,
-        collections: {
-          ...snapshot.collections,
-          [collection]: failCollectionLoad(snapshot.collections[collection] as CollectionState<any>, generation, String(error)),
-        },
-      } : snapshot)
+      this.update((snapshot) =>
+        this.viewGeneration === viewGeneration
+          ? {
+              ...snapshot,
+              collections: {
+                ...snapshot.collections,
+                [collection]: failCollectionLoad(
+                  snapshot.collections[collection] as CollectionState<any>,
+                  generation,
+                  String(error)
+                ),
+              },
+            }
+          : snapshot
+      )
     }
   }
 
   private runApi = async <A>(
-    operation: (api: SpotifyApiShape, token: string) => Effect.Effect<A, unknown>
+    operation: (
+      api: SpotifyApiShape,
+      token: string
+    ) => Effect.Effect<A, unknown>
   ) => {
-    const execute = async () => operation(this.dependencies.api, await this.accessToken()).pipe(Effect.runPromise)
+    const execute = async () =>
+      operation(this.dependencies.api, await this.accessToken()).pipe(
+        Effect.runPromise
+      )
     try {
       return await execute()
     } catch (error) {
-      if (typeof error === "object" && error !== null && "statusCode" in error && error.statusCode === 401) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "statusCode" in error &&
+        error.statusCode === 401
+      ) {
         this.token = null
         return execute()
       }
@@ -572,16 +743,27 @@ export class SpotifyBridge {
     }
   }
 
-  private runCollectionApi = (collection: LibraryCollection, continuation?: Continuation | null) => {
+  private runCollectionApi = (
+    collection: LibraryCollection,
+    continuation?: Continuation | null
+  ) => {
     switch (collection) {
       case "playlists":
-        return this.runApi((api, token) => api.listPlaylists(token, continuation))
+        return this.runApi((api, token) =>
+          api.listPlaylists(token, continuation)
+        )
       case "saved-tracks":
-        return this.runApi((api, token) => api.listSavedTracks(token, continuation))
+        return this.runApi((api, token) =>
+          api.listSavedTracks(token, continuation)
+        )
       case "saved-albums":
-        return this.runApi((api, token) => api.listSavedAlbums(token, continuation))
+        return this.runApi((api, token) =>
+          api.listSavedAlbums(token, continuation)
+        )
       case "followed-artists":
-        return this.runApi((api, token) => api.listFollowedArtists(token, continuation))
+        return this.runApi((api, token) =>
+          api.listFollowedArtists(token, continuation)
+        )
     }
   }
 }

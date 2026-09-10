@@ -10,15 +10,17 @@ import { SpotifyBridge } from "../src/bridge"
 import type { PlaybackEvent, PlaybackHost } from "../src/player"
 import type { SpotifyApiShape } from "../src/spotifyApi"
 
-const fakePlayer = () => ({
+const fakePlayer = (): PlaybackHost => ({
   start: async () => ({
-    output: "local" as const,
-    subscribe: () => () => {
-      void 0
-    },
-    stop: async () => {
-      void 0
-    },
+    output: "local",
+    subscribe: () => () => void 0,
+    play: async () => void 0,
+    pause: async () => void 0,
+    resume: async () => void 0,
+    stop: async () => void 0,
+    next: async () => void 0,
+    previous: async () => void 0,
+    close: async () => void 0,
   }),
 })
 
@@ -91,11 +93,7 @@ describe("bridge collection state", () => {
         listSavedTracks: () => Effect.succeed({ items: [], total: 0, continuation: null }),
         listSavedAlbums: () => Effect.succeed({ items: [], total: 0, continuation: null }),
         listFollowedArtists: () => Effect.succeed({ items: [], total: 0, continuation: null }),
-        listDevices: () => Effect.succeed([]),
-        play: () => Effect.void,
-        pause: () => Effect.void,
-        next: () => Effect.void,
-        previous: () => Effect.void,
+        listAlbumTracks: () => Effect.succeed({ items: [], total: 0, continuation: null }),
       },
       player: fakePlayer(),
     })
@@ -136,40 +134,37 @@ describe("bridge playback", () => {
         Effect.succeed({ items: [], total: 0, continuation: null }),
       listFollowedArtists: () =>
         Effect.succeed({ items: [], total: 0, continuation: null }),
-      listDevices: () => Effect.succeed([]),
-      play: () => Effect.void,
-      pause: () => Effect.void,
-      next: () => Effect.void,
-      previous: () => Effect.void,
+      listAlbumTracks: () => Effect.succeed({ items: [], total: 0, continuation: null }),
     }) satisfies SpotifyApiShape
 
-  const trackedPlayer = () => {
-    const starts: Array<{ accessToken: string; deviceId: string }> = []
+  const recordedPlayer = () => {
     const listeners: Array<(event: PlaybackEvent) => void> = []
+    const calls: Array<{ method: string; args: unknown[] }> = []
     const host: PlaybackHost = {
-      start: async (input) => {
-        starts.push({ accessToken: input.accessToken, deviceId: input.deviceId })
+      start: async () => {
+        calls.push({ method: "start", args: [] })
         return {
           output: "local",
           subscribe: (listener) => {
             listeners.push(listener)
             return () => void 0
           },
-          stop: async () => void 0,
+          play: async (target) => void calls.push({ method: "play", args: [target] }),
+          pause: async () => void calls.push({ method: "pause", args: [] }),
+          resume: async () => void calls.push({ method: "resume", args: [] }),
+          stop: async () => void calls.push({ method: "stop", args: [] }),
+          next: async () => void calls.push({ method: "next", args: [] }),
+          previous: async () => void calls.push({ method: "previous", args: [] }),
+          close: async () => void calls.push({ method: "close", args: [] }),
         }
       },
     }
-    return { host, starts, listeners }
+    return { host, listeners, calls }
   }
 
-  const makeBridge = (
-    api: SpotifyApiShape,
-    player: PlaybackHost,
-    deviceId = "spotui-local"
-  ) => {
+  const makeBridge = (api: SpotifyApiShape, player: PlaybackHost) => {
     const bridge = new SpotifyBridge({
       credentials: { clientId: "client", refreshToken: "refresh" },
-      deviceId,
       refreshToken: async () => ({
         accessToken: "access",
         expiresAt: Date.now() + 60_000,
@@ -181,46 +176,31 @@ describe("bridge playback", () => {
     return bridge
   }
 
-  test("plays the selected track through the local device", async () => {
-    const playCalls: Array<{
-      readonly uris?: readonly string[]
-      readonly contextUri?: string
-      readonly deviceId?: string
-    }> = []
-    const api = {
-      ...baseApi(),
-      play: (
-        _token: string,
-        input: {
-          readonly uris?: readonly string[]
-          readonly contextUri?: string
-          readonly deviceId?: string
-        }
-      ) => {
-        playCalls.push(input)
-        return Effect.void
-      },
-    } satisfies SpotifyApiShape
-    const { host, starts } = trackedPlayer()
-    const bridge = makeBridge(api, host)
+  test("plays the selected track through the local session", async () => {
+    const { host, calls } = recordedPlayer()
+    const bridge = makeBridge(baseApi(), host)
 
     await bridge.start()
     bridge.selectCollection("saved-tracks")
     await bridge.playSelected()
 
-    expect(starts).toEqual([{ accessToken: "access", deviceId: "spotui-local" }])
-    expect(playCalls).toEqual([
-      { deviceId: "spotui-local", uris: ["spotify:track:track-1"] },
+    expect(calls).toEqual([
+      { method: "start", args: [] },
+      { method: "play", args: [{ uris: ["spotify:track:track-1"] }] },
     ])
     expect(bridge.getSnapshot().playback.status).toBe("loading")
   })
 
-  test("plays an album as a context", async () => {
-    const playCalls: Array<{
-      readonly uris?: readonly string[]
-      readonly contextUri?: string
-      readonly deviceId?: string
-    }> = []
+  test("resolves an album into its tracks and plays them", async () => {
+    const albumTrack = {
+      kind: "track",
+      id: "album-track-1",
+      name: "Opening",
+      uri: "spotify:track:album-track-1",
+      durationMs: 180_000,
+      artists: [],
+      album: null,
+    } as const
     const api = {
       ...baseApi(),
       listSavedAlbums: () =>
@@ -237,26 +217,25 @@ describe("bridge playback", () => {
           total: 1,
           continuation: null,
         }),
-      play: (
-        _token: string,
-        input: {
-          readonly uris?: readonly string[]
-          readonly contextUri?: string
-          readonly deviceId?: string
-        }
-      ) => {
-        playCalls.push(input)
-        return Effect.void
+      listAlbumTracks: (_token: string, albumId: string) => {
+        expect(albumId).toBe("album-1")
+        return Effect.succeed({
+          items: [albumTrack],
+          total: 1,
+          continuation: null,
+        })
       },
     } satisfies SpotifyApiShape
-    const bridge = makeBridge(api, trackedPlayer().host)
+    const { host, calls } = recordedPlayer()
+    const bridge = makeBridge(api, host)
 
     await bridge.start()
     bridge.selectCollection("saved-albums")
     await bridge.playSelected()
 
-    expect(playCalls).toEqual([
-      { deviceId: "spotui-local", contextUri: "spotify:album:album-1" },
+    expect(calls).toEqual([
+      { method: "start", args: [] },
+      { method: "play", args: [{ uris: ["spotify:track:album-track-1"] }] },
     ])
   })
 
@@ -270,7 +249,7 @@ describe("bridge playback", () => {
           continuation: null,
         }),
     } satisfies SpotifyApiShape
-    const bridge = makeBridge(api, trackedPlayer().host)
+    const bridge = makeBridge(api, recordedPlayer().host)
 
     await bridge.start()
     bridge.selectCollection("followed-artists")
@@ -280,17 +259,31 @@ describe("bridge playback", () => {
     expect(bridge.getSnapshot().playback.error).toContain("cannot be played")
   })
 
-  test("toggles pause when the device is playing", async () => {
-    const pauseCalls: string[] = []
+  test("asks the user to open a playlist before playing it", async () => {
     const api = {
       ...baseApi(),
-      pause: (_token: string, deviceId: string) => {
-        pauseCalls.push(deviceId)
-        return Effect.void
-      },
+      listPlaylists: () =>
+        Effect.succeed({
+          items: [
+            { kind: "playlist", id: "playlist-1", name: "Mix", imageUrl: null, itemCount: 3 },
+          ],
+          total: 1,
+          continuation: null,
+        }),
     } satisfies SpotifyApiShape
-    const { host, listeners } = trackedPlayer()
-    const bridge = makeBridge(api, host)
+    const bridge = makeBridge(api, recordedPlayer().host)
+
+    await bridge.start()
+    bridge.selectCollection("playlists")
+    await bridge.playSelected()
+
+    expect(bridge.getSnapshot().playback.status).toBe("error")
+    expect(bridge.getSnapshot().playback.error).toContain("Open the playlist first")
+  })
+
+  test("pauses through the host when playing", async () => {
+    const { host, listeners, calls } = recordedPlayer()
+    const bridge = makeBridge(baseApi(), host)
 
     await bridge.start()
     bridge.selectCollection("saved-tracks")
@@ -307,13 +300,27 @@ describe("bridge playback", () => {
     })
 
     await bridge.togglePlayback()
+    listeners[0]!({
+      type: "paused",
+      uri: null,
+      title: null,
+      artist: null,
+      album: null,
+      positionMs: 1200,
+      durationMs: null,
+      message: null,
+    })
 
-    expect(pauseCalls).toEqual(["spotui-local"])
+    expect(calls.map((call) => call.method)).toEqual([
+      "start",
+      "play",
+      "pause",
+    ])
     expect(bridge.getSnapshot().playback.status).toBe("paused")
   })
 
-  test("tracks now playing from the device events", async () => {
-    const { host, listeners } = trackedPlayer()
+  test("tracks now playing from the host events", async () => {
+    const { host, listeners } = recordedPlayer()
     const bridge = makeBridge(baseApi(), host)
 
     await bridge.start()

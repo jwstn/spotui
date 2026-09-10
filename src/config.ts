@@ -1,12 +1,57 @@
 import { Effect, Schema } from "effect"
-import { stat } from "node:fs/promises"
+import { stat, mkdir, readFile, writeFile, chmod } from "node:fs/promises"
+import { dirname as nodeDirname, join as nodeJoin } from "node:path"
 
 export type ConfigPlatform = "linux" | "macos" | "windows"
+
+export const KEYMASTER_CLIENT_ID = "65b708073fc0480ea92a077233ca87bd"
 
 export interface SpotifyCredentials {
   readonly clientId: string
   readonly refreshToken: string
 }
+
+/**
+ * Reusable librespot login5 credentials, persisted after the first login so
+ * playback can start without re-running an OAuth flow. Obtained by handing a
+ * keymaster-minted token to `loginWithAccessToken`.
+ */
+export interface PlaybackCredentials {
+  readonly username: string
+  readonly credentialsJson: string
+}
+
+export const playbackCredentialsPathFor = (configPath: string) =>
+  nodeJoin(nodeDirname(configPath), "playback.json")
+
+export const readPlaybackCredentials = (path: string) =>
+  Effect.tryPromise({
+    try: async () => {
+      const file = Bun.file(path)
+      if (!(await file.exists())) return null
+      return JSON.parse(await readFile(path, "utf8")) as PlaybackCredentials
+    },
+    catch: (cause) =>
+      new Error(
+        `Spotify playback credentials could not be read: ${String(cause)}`
+      ),
+  })
+
+export const writePlaybackCredentials = (
+  path: string,
+  credentials: PlaybackCredentials
+) =>
+  Effect.tryPromise({
+    try: async () => {
+      await mkdir(nodeDirname(path), { recursive: true })
+      await writeFile(path, JSON.stringify(credentials), { mode: 0o600 })
+      await chmod(path, 0o600)
+    },
+    catch: (cause) =>
+      new Error(
+        `Spotify playback credentials could not be written: ${String(cause)}`
+      ),
+  })
 
 export type ParsedSpotifyConfig =
   | ({ readonly kind: "ready"; readonly path: string } & SpotifyCredentials)
@@ -19,7 +64,11 @@ export type ParsedSpotifyConfig =
 export type ConfigPath =
   | { readonly kind: "default"; readonly path: string }
   | { readonly kind: "override"; readonly path: string }
-  | { readonly kind: "invalid"; readonly path: string; readonly message: string }
+  | {
+      readonly kind: "invalid"
+      readonly path: string
+      readonly message: string
+    }
 
 export interface ConfigPathInput {
   readonly platform: ConfigPlatform
@@ -35,7 +84,9 @@ const join = (parts: readonly string[], separator: "/" | "\\") =>
     .join(separator)
 
 const isAbsolutePath = (value: string) =>
-  value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\")
+  value.startsWith("/") ||
+  /^[A-Za-z]:[\\/]/.test(value) ||
+  value.startsWith("\\\\")
 
 export const configPathFor = (
   platform: ConfigPlatform,
@@ -105,10 +156,7 @@ export const parseSpotifyConfig = (
     return { kind: "invalid", path, message: "Missing [spotify] section." }
   }
 
-  const clientId = textField(decoded.spotify.client_id)
-  if (!clientId) {
-    return { kind: "invalid", path, message: "Missing spotify.client_id." }
-  }
+  const clientId = textField(decoded.spotify.client_id) ?? KEYMASTER_CLIENT_ID
 
   const refreshToken = textField(decoded.spotify.refresh_token)
   if (!refreshToken) {

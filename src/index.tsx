@@ -61,7 +61,6 @@ const LoginScreen = ({
     const key = event.name.toLowerCase()
     if (key === "backspace") return setClientId((value) => value.slice(0, -1))
     if (key === "return" || key === "enter") {
-      if (!clientId.trim()) return setStatus("Enter a Spotify client ID first.")
       setStatus("Opening the Spotify authorization page...")
       void authorizeWithPkce(clientId.trim(), path).then(
         onAuthorized,
@@ -89,16 +88,17 @@ const LoginScreen = ({
         <text fg={colors.muted}>{message}</text>
         <text fg={colors.muted}>Config path: {path}</text>
         <text fg={colors.text}>
-          Create an app in the Spotify Developer Dashboard, then enter its
-          client ID:
+          Optional: enter a Spotify Developer Dashboard client ID to browse with
+          your own app. Leave empty to use Spotify's keymaster client:
         </text>
         <input
           backgroundColor={colors.selectedBackground}
           onInput={setClientId}
-          placeholder="cliend id goes here.."
+          placeholder="client id goes here (optional).."
         />
         <text fg={colors.accent}>
-          Enter to open the PKCE browser flow. Esc is not required.
+          Enter to open the PKCE browser flow. A Premium account is needed for
+          playback.
         </text>
         <text fg={colors.muted}>
           {status ?? "SpotUI manages access via PKCE."}

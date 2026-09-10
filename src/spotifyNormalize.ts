@@ -1,7 +1,6 @@
 import type {
   Album,
   Artist,
-  Device,
   EpisodeItem,
   Page,
   PlaylistItem,
@@ -11,7 +10,6 @@ import type {
 import type {
   RawAlbum,
   RawArtist,
-  RawDevice,
   RawPlaylist,
   RawPlaylistItem,
   RawTrack,
@@ -52,12 +50,6 @@ export const normalizePlaylist = (raw: RawPlaylist): PlaylistSummary => ({
   imageUrl: firstImage(raw.images),
   itemCount: raw.tracks?.total ?? null,
 })
-
-export const normalizeDevice = (raw: RawDevice): Device | null => {
-  const id = raw.id
-  if (!id) return null
-  return { kind: "device", id, name: raw.name, isActive: raw.is_active ?? false }
-}
 
 export const normalizePlaylistItem = (
   raw: RawPlaylistItem,
@@ -102,11 +94,18 @@ export const normalizePlaylistItem = (
 
 export const pageFromOffset = <T>(
   items: readonly T[],
-  input: { readonly offset: number; readonly limit: number; readonly total?: number },
+  input: {
+    readonly offset: number
+    readonly limit: number
+    readonly total?: number
+  },
   sourceCount = items.length
 ): Page<T> => {
   const nextOffset = input.offset + sourceCount
-  const hasMore = input.total === undefined ? sourceCount >= input.limit : nextOffset < input.total
+  const hasMore =
+    input.total === undefined
+      ? sourceCount >= input.limit
+      : nextOffset < input.total
   return {
     items,
     total: input.total ?? null,
@@ -118,7 +117,11 @@ export const pageFromOffset = <T>(
 
 export const pageFromFollowing = <T>(
   items: readonly T[],
-  input: { readonly after: string | null; readonly limit: number; readonly total?: number }
+  input: {
+    readonly after: string | null
+    readonly limit: number
+    readonly total?: number
+  }
 ): Page<T> => ({
   items,
   total: input.total ?? null,

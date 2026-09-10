@@ -3,7 +3,13 @@ import { dirname } from "node:path"
 import { chmod, mkdir, rename } from "node:fs/promises"
 
 import { CurlRunner, CurlRunnerLive, type CurlProcessError } from "./curl"
-import type { SpotifyCredentials } from "./config"
+import {
+  KEYMASTER_CLIENT_ID,
+  playbackCredentialsPathFor,
+  writePlaybackCredentials,
+  type SpotifyCredentials,
+} from "./config"
+import { capturePlaybackCredentials } from "./player"
 
 export const AUTHORIZATION_ENDPOINT = "https://accounts.spotify.com/authorize"
 export const TOKEN_ENDPOINT = "https://accounts.spotify.com/api/token"
@@ -12,11 +18,8 @@ export const USER_SCOPES = [
   "playlist-read-collaborative",
   "user-library-read",
   "user-follow-read",
-  "streaming",
-  "user-read-playback-state",
-  "user-modify-playback-state",
-  "user-read-currently-playing",
 ] as const
+export const PLAYBACK_SCOPES = ["streaming"] as const
 
 export interface PkcePair {
   readonly verifier: string
@@ -147,40 +150,108 @@ export const AuthServiceLive = Layer.effect(
       )
     )
 
-    const authorize = Effect.fn("AuthService/authorize")(function* (clientId: string, configPath: string) {
-      const pair = yield* Effect.tryPromise({
-        try: createPkcePair,
-        catch: (cause) => new AuthError({ message: "PKCE could not be initialized.", cause }),
-      })
-      const state = base64Url(crypto.getRandomValues(new Uint8Array(24)).buffer as ArrayBuffer)
-      const callback = yield* waitForAuthorizationCode({ clientId, pair, state })
-      const response = yield* curl
-        .runJson(
-          RawTokenResponseSchema,
-          authorizationCodeRequest({
-            clientId,
-            code: callback.code,
-            redirectUri: callback.redirectUri,
-            verifier: pair.verifier,
-          })
+    const runAuthorizationFlow = Effect.fn("AuthService/runAuthorizationFlow")(
+      function* (flow: {
+        readonly clientId: string
+        readonly scopes: readonly string[]
+      }) {
+        const pair = yield* Effect.tryPromise({
+          try: createPkcePair,
+          catch: (cause) =>
+            new AuthError({ message: "PKCE could not be initialized.", cause }),
+        })
+        const state = base64Url(
+          crypto.getRandomValues(new Uint8Array(24)).buffer as ArrayBuffer
         )
-        .pipe(
-          Effect.mapError(
-            (cause) =>
-              new AuthError({
-                message: "Spotify authorization code exchange failed.",
-                cause,
-              })
+        const callback = yield* waitForAuthorizationCode({
+          clientId: flow.clientId,
+          pair,
+          state,
+        })
+        const response = yield* curl
+          .runJson(
+            RawTokenResponseSchema,
+            authorizationCodeRequest({
+              clientId: flow.clientId,
+              code: callback.code,
+              redirectUri: callback.redirectUri,
+              verifier: pair.verifier,
+            })
           )
-        )
-      if (!response.refresh_token) {
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new AuthError({
+                  message: "Spotify authorization code exchange failed.",
+                  cause,
+                })
+            )
+          )
+        return response
+      }
+    )
+
+    const authorize = Effect.fn("AuthService/authorize")(function* (
+      clientId: string,
+      configPath: string
+    ) {
+      const custom = clientId.trim()
+      const usesKeymaster = !custom || custom === KEYMASTER_CLIENT_ID
+      const webClientId = usesKeymaster
+        ? KEYMASTER_CLIENT_ID
+        : custom
+      const webScopes: readonly string[] = usesKeymaster
+        ? [...USER_SCOPES, ...PLAYBACK_SCOPES]
+        : USER_SCOPES
+
+      const web = yield* runAuthorizationFlow({
+        clientId: webClientId,
+        scopes: webScopes,
+      })
+      if (!web.refresh_token) {
         return yield* new AuthError({
           message: "Spotify did not return a refresh token.",
-          cause: response,
+          cause: web,
         })
       }
-      const credentials = { clientId, refreshToken: response.refresh_token }
+      const credentials: SpotifyCredentials = {
+        clientId: webClientId,
+        refreshToken: web.refresh_token,
+      }
       yield* writeSpotifyConfig(configPath, credentials)
+
+      // Mint reusable librespot playback credentials with a keymaster-minted
+      // token so later sessions boot without another browser flow. Best-effort:
+      // a Free account still gets read-only browsing.
+      const playbackResponse =
+        usesKeymaster
+          ? { access_token: web.access_token }
+          : yield* runAuthorizationFlow({
+              clientId: KEYMASTER_CLIENT_ID,
+              scopes: PLAYBACK_SCOPES,
+            }).pipe(
+              Effect.match({
+                onFailure: () => null,
+                onSuccess: (response) => response,
+              })
+            )
+      const playbackToken = playbackResponse?.access_token
+      if (playbackToken) {
+        const creds = yield* Effect.tryPromise(() =>
+          capturePlaybackCredentials(playbackToken)
+        ).pipe(
+          Effect.match({
+            onFailure: () => null,
+            onSuccess: (value) => value,
+          })
+        )
+        if (creds) {
+          yield* writePlaybackCredentials(
+            playbackCredentialsPathFor(configPath),
+            creds
+          ).pipe(Effect.ignore)
+        }
+      }
       return credentials
     })
 

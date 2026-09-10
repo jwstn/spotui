@@ -16,6 +16,7 @@ describe("Spotify authorization", () => {
     expect(url.searchParams.get("code_challenge_method")).toBe("S256")
     expect(url.searchParams.get("scope")).toContain("playlist-read-private")
     expect(url.searchParams.get("scope")).toContain("user-library-read")
+    expect(url.searchParams.get("scope")).not.toContain("streaming")
   })
 
   test("refreshes with client ID and refresh token, never a client secret", () => {

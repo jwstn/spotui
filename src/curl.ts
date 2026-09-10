@@ -5,11 +5,10 @@ import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 
 export interface CurlRequest {
-  readonly method: "GET" | "POST" | "PUT"
+  readonly method: "GET" | "POST"
   readonly url: string
   readonly headers?: Readonly<Record<string, string>>
   readonly form?: Readonly<Record<string, string>>
-  readonly json?: unknown
 }
 
 export interface CurlResponse {
@@ -35,11 +34,6 @@ export const buildCurlArgs = (request: CurlRequest): readonly string[] => {
 
   if (request.form) {
     args.push("--data", new URLSearchParams(request.form).toString())
-  }
-
-  if (request.json !== undefined) {
-    args.push("--header", "Content-Type: application/json")
-    args.push("--data", JSON.stringify(request.json))
   }
 
   args.push("--write-out", "\\n%{http_code}")
@@ -155,9 +149,13 @@ export const CurlRunnerLive = Layer.effect(
             })
           ),
       }).pipe(
-        Effect.map((result) => ({ ...result, ...splitStatusCode(result.stdout) })),
+        Effect.map((result) => ({
+          ...result,
+          ...splitStatusCode(result.stdout),
+        })),
         Effect.flatMap((result) =>
-          result.exitCode === 0 && (result.statusCode === null || result.statusCode < 400)
+          result.exitCode === 0 &&
+          (result.statusCode === null || result.statusCode < 400)
             ? Effect.succeed(result)
             : Effect.fail(
                 new CurlProcessError({
