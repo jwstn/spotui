@@ -68,7 +68,7 @@ const LoginScreen = ({
           <text fg={colors.selectedText}>{clientId || "_"}</text>
         </box>
         <text fg={colors.accent}>Enter to open the PKCE browser flow. Esc is not required.</text>
-        <text fg={colors.muted}>{status ?? "The app never asks for a client secret or bearer token."}</text>
+        <text fg={colors.muted}>{status ?? "SpotUI manages access via PKCE."}</text>
       </box>
     </box>
   )
@@ -142,7 +142,7 @@ const ReadyScreen = ({ bridge, snapshot, colors }: { readonly bridge: ReturnType
       }
       return
     }
-    if (event.ctrl && key === "p") return setPaletteOpen(true)
+    if ((event.ctrl && key === "p") || key === "/") return setPaletteOpen(true)
     if (key === "up" || key === "k") return bridge.moveSelection(-1)
     if (key === "down" || key === "j") return bridge.moveSelection(1)
     if (key === "return" || key === "enter") return runCommand("open")
@@ -158,9 +158,9 @@ const ReadyScreen = ({ bridge, snapshot, colors }: { readonly bridge: ReturnType
     <box flexGrow={1} flexDirection="column" backgroundColor={colors.background}>
       <box height={1} flexDirection="row" paddingLeft={1} paddingRight={1}>
         <text fg={colors.accent}>SPOTUI</text>
-        <text fg={colors.muted}>  {snapshot.playlistId ? "Playlist tracks" : collectionLabels[snapshot.activeCollection]}</text>
+        <text fg={colors.muted}>  {snapshot.playlistId ? "Playlist items" : collectionLabels[snapshot.activeCollection]}</text>
         <box flexGrow={1} />
-        <text fg={colors.muted}>Ctrl-P commands  q quit</text>
+        <text fg={colors.muted}>/ or Ctrl-P commands  q quit</text>
       </box>
       <box height={1} flexDirection="row" backgroundColor={colors.panel}>
         {collectionKeys.map((collection, index) => (
@@ -207,6 +207,11 @@ const App = () => {
   const { width = 100, height = 24 } = useTerminalDimensions()
   const [state, setState] = useState<AppState>({ kind: "loading", path: configPath })
   const colors = resolveTheme(defaultThemeConfig, "dark").colors
+  const onAuthorized = (credentials: { readonly clientId: string; readonly refreshToken: string }) => {
+    const bridge = createLiveBridge(credentials, configPath.path)
+    setState({ kind: "ready", bridge })
+    void bridge.start()
+  }
 
   useEffect(() => {
     if (configPath.kind === "invalid") {
@@ -241,22 +246,18 @@ const App = () => {
         path={state.path}
         message={state.message}
         colors={colors}
-        onAuthorized={(credentials) => {
-          const bridge = createLiveBridge(credentials, configPath.path)
-          setState({ kind: "ready", bridge })
-          void bridge.start()
-        }}
+        onAuthorized={onAuthorized}
       />
     )
   }
   if (state.kind === "error") return <ErrorScreen path={state.path} message={state.message} colors={colors} />
-  return <BridgeView bridge={state.bridge} colors={colors} />
+  return <BridgeView bridge={state.bridge} colors={colors} onAuthorized={onAuthorized} />
 }
 
-const BridgeView = ({ bridge, colors }: { readonly bridge: ReturnType<typeof createLiveBridge>; readonly colors: ColorPalette }) => {
+const BridgeView = ({ bridge, colors, onAuthorized }: { readonly bridge: ReturnType<typeof createLiveBridge>; readonly colors: ColorPalette; readonly onAuthorized: (credentials: { readonly clientId: string; readonly refreshToken: string }) => void }) => {
   const [snapshot, setSnapshot] = useState<BridgeSnapshot>(bridge.getSnapshot())
   useEffect(() => bridge.subscribe(() => setSnapshot(bridge.getSnapshot())), [bridge])
-  if (snapshot.auth === "error") return <ErrorScreen path={configPath.path} message={snapshot.authError ?? "Authorization required."} colors={colors} />
+  if (snapshot.auth === "error") return <LoginScreen path={configPath.path} message={snapshot.authError ?? "Authorization required."} colors={colors} onAuthorized={onAuthorized} />
   if (snapshot.auth !== "ready") return <box flexGrow={1} justifyContent="center" alignItems="center" backgroundColor={colors.background}><text fg={colors.accent}>Authorizing Spotify...</text></box>
   return <ReadyScreen bridge={bridge} snapshot={snapshot} colors={colors} />
 }

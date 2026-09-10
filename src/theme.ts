@@ -82,28 +82,93 @@ const light: ColorPalette = {
 
 const definitions: Record<Exclude<ThemeId, "system">, ThemeDefinition> = {
   ghui: { id: "ghui", name: "ghui", tone: "dark", colors: ghui },
-  "tokyo-night": { id: "tokyo-night", name: "Tokyo Night", tone: "dark", colors: ghui },
-  catppuccin: { id: "catppuccin", name: "Catppuccin", tone: "dark", colors: ghui },
-  "catppuccin-latte": { id: "catppuccin-latte", name: "Catppuccin Latte", tone: "light", colors: light },
-  "rose-pine": { id: "rose-pine", name: "Rose Pine", tone: "dark", colors: ghui },
-  "rose-pine-dawn": { id: "rose-pine-dawn", name: "Rose Pine Dawn", tone: "light", colors: light },
+  "tokyo-night": {
+    id: "tokyo-night",
+    name: "Tokyo Night",
+    tone: "dark",
+    colors: ghui,
+  },
+  catppuccin: {
+    id: "catppuccin",
+    name: "Catppuccin",
+    tone: "dark",
+    colors: ghui,
+  },
+  "catppuccin-latte": {
+    id: "catppuccin-latte",
+    name: "Catppuccin Latte",
+    tone: "light",
+    colors: light,
+  },
+  "rose-pine": {
+    id: "rose-pine",
+    name: "Rose Pine",
+    tone: "dark",
+    colors: ghui,
+  },
+  "rose-pine-dawn": {
+    id: "rose-pine-dawn",
+    name: "Rose Pine Dawn",
+    tone: "light",
+    colors: light,
+  },
   gruvbox: { id: "gruvbox", name: "Gruvbox", tone: "dark", colors: ghui },
-  "gruvbox-light": { id: "gruvbox-light", name: "Gruvbox Light", tone: "light", colors: light },
+  "gruvbox-light": {
+    id: "gruvbox-light",
+    name: "Gruvbox Light",
+    tone: "light",
+    colors: light,
+  },
   nord: { id: "nord", name: "Nord", tone: "dark", colors: ghui },
   dracula: { id: "dracula", name: "Dracula", tone: "dark", colors: ghui },
   kanagawa: { id: "kanagawa", name: "Kanagawa", tone: "dark", colors: ghui },
   "one-dark": { id: "one-dark", name: "One Dark", tone: "dark", colors: ghui },
-  "one-light": { id: "one-light", name: "One Light", tone: "light", colors: light },
+  "one-light": {
+    id: "one-light",
+    name: "One Light",
+    tone: "light",
+    colors: light,
+  },
   monokai: { id: "monokai", name: "Monokai", tone: "dark", colors: ghui },
-  "solarized-dark": { id: "solarized-dark", name: "Solarized Dark", tone: "dark", colors: ghui },
-  "solarized-light": { id: "solarized-light", name: "Solarized Light", tone: "light", colors: light },
-  everforest: { id: "everforest", name: "Everforest", tone: "dark", colors: ghui },
+  "solarized-dark": {
+    id: "solarized-dark",
+    name: "Solarized Dark",
+    tone: "dark",
+    colors: ghui,
+  },
+  "solarized-light": {
+    id: "solarized-light",
+    name: "Solarized Light",
+    tone: "light",
+    colors: light,
+  },
+  everforest: {
+    id: "everforest",
+    name: "Everforest",
+    tone: "dark",
+    colors: ghui,
+  },
   vesper: { id: "vesper", name: "Vesper", tone: "dark", colors: ghui },
   vague: { id: "vague", name: "Vague", tone: "dark", colors: ghui },
   ayu: { id: "ayu", name: "Ayu", tone: "dark", colors: ghui },
-  "ayu-mirage": { id: "ayu-mirage", name: "Ayu Mirage", tone: "dark", colors: ghui },
-  "ayu-light": { id: "ayu-light", name: "Ayu Light", tone: "light", colors: light },
-  "github-dark-dimmed": { id: "github-dark-dimmed", name: "GitHub Dark Dimmed", tone: "dark", colors: ghui },
+  "ayu-mirage": {
+    id: "ayu-mirage",
+    name: "Ayu Mirage",
+    tone: "dark",
+    colors: ghui,
+  },
+  "ayu-light": {
+    id: "ayu-light",
+    name: "Ayu Light",
+    tone: "light",
+    colors: light,
+  },
+  "github-dark-dimmed": {
+    id: "github-dark-dimmed",
+    name: "GitHub Dark Dimmed",
+    tone: "dark",
+    colors: ghui,
+  },
   palenight: { id: "palenight", name: "Palenight", tone: "dark", colors: ghui },
   opencode: { id: "opencode", name: "OpenCode", tone: "dark", colors: ghui },
   cursor: { id: "cursor", name: "Cursor", tone: "dark", colors: ghui },
@@ -111,7 +176,15 @@ const definitions: Record<Exclude<ThemeId, "system">, ThemeDefinition> = {
 
 export const defaultThemeConfig: ThemeConfig = { mode: "fixed", theme: "ghui" }
 
-export const resolveTheme = (config: ThemeConfig, systemTone: ThemeTone): ThemeDefinition => {
-  const id = config.mode === "fixed" ? config.theme : systemTone === "dark" ? config.darkTheme : config.lightTheme
+export const resolveTheme = (
+  config: ThemeConfig,
+  systemTone: ThemeTone
+): ThemeDefinition => {
+  const id =
+    config.mode === "fixed"
+      ? config.theme
+      : systemTone === "dark"
+        ? config.darkTheme
+        : config.lightTheme
   return id === "system" ? definitions.ghui : definitions[id]
 }

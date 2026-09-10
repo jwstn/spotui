@@ -49,6 +49,8 @@ export class CurlProcessError extends Schema.TaggedError<CurlProcessError>()(
     stderr: Schema.String,
     exitCode: Schema.Number,
     statusCode: Schema.NullOr(Schema.Number),
+    retryAfterSeconds: Schema.NullOr(Schema.Number),
+    kind: Schema.Literals(["process", "timeout", "http"]),
     message: Schema.String,
   }
 ) {}
@@ -86,6 +88,11 @@ const splitStatusCode = (stdout: string) => {
     : { stdout, statusCode: null }
 }
 
+const retryAfterFrom = (stderr: string) => {
+  const match = stderr.match(/retry-after:\s*(\d+)/i)
+  return match ? Number(match[1]) : null
+}
+
 const runProcess = (args: readonly string[]) =>
   Effect.tryPromise({
     try: async (signal) => {
@@ -115,6 +122,8 @@ const runProcess = (args: readonly string[]) =>
         stderr: String(cause),
         exitCode: -1,
         statusCode: null,
+        retryAfterSeconds: null,
+        kind: "process",
         message: "The curl process could not be started.",
       }),
   })
@@ -134,6 +143,8 @@ export const CurlRunnerLive = Layer.effect(
               stderr: "",
               exitCode: -1,
               statusCode: null,
+              retryAfterSeconds: null,
+              kind: "timeout",
               message: "The curl request timed out.",
             })
           ),
@@ -146,6 +157,8 @@ export const CurlRunnerLive = Layer.effect(
                 new CurlProcessError({
                   args: [...args],
                   ...result,
+                  retryAfterSeconds: retryAfterFrom(result.stderr),
+                  kind: "http",
                   message: "The curl request failed.",
                 })
               )
@@ -159,7 +172,11 @@ export const CurlRunnerLive = Layer.effect(
           times: 2,
           schedule: Schedule.exponential("300 millis"),
           while: (error) =>
-            error.statusCode === null || error.statusCode === 429 || error.statusCode >= 500,
+            error.kind === "process" ||
+            (error.statusCode !== null && error.statusCode >= 500) ||
+            (error.statusCode === 429 &&
+              error.retryAfterSeconds !== null &&
+              error.retryAfterSeconds <= 30),
         })
       )
     )
