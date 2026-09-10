@@ -69,8 +69,6 @@ const LoginScreen = ({
       )
       return
     }
-    if (!event.ctrl && !event.meta && key.length === 1)
-      setClientId((value) => value + event.name)
   })
 
   return (
@@ -94,9 +92,11 @@ const LoginScreen = ({
           Create an app in the Spotify Developer Dashboard, then enter its
           client ID:
         </text>
-        <box backgroundColor={colors.selectedBackground}>
-          <text fg={colors.selectedText}>{clientId || "_"}</text>
-        </box>
+        <input
+          backgroundColor={colors.selectedBackground}
+          onInput={setClientId}
+          placeholder="cliend id goes here.."
+        />
         <text fg={colors.accent}>
           Enter to open the PKCE browser flow. Esc is not required.
         </text>
