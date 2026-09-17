@@ -3,22 +3,21 @@ import { Context, Effect, Layer, Schema } from "effect"
 import type {
   Continuation,
   Page,
-  PlaylistItem,
+  PlayListItem,
   PlaylistSummary,
   Track,
   Album,
   Artist,
-} from "./domain"
-import { CurlProcessError, CurlService, CurlServiceLive } from "./curl"
+} from "#/service/domain"
+import { CurlService, CurlServiceLive } from "#/service/curl"
+import { CurlProcessError } from "#/service/curl/error"
 import {
-  RawAlbumSchema,
   RawAlbumTracksResponseSchema,
   RawFollowingPageSchema,
   RawPlaylistItemsResponseSchema,
   RawPlaylistsResponseSchema,
   RawSavedAlbumsResponseSchema,
   RawSavedTracksResponseSchema,
-  RawTrackSchema,
 } from "../spotifySchemas"
 import {
   normalizeAlbum,
@@ -50,7 +49,7 @@ export interface SpotifyApiShape {
     token: string,
     playlistId: string,
     continuation?: Continuation | null
-  ) => Effect.Effect<Page<PlaylistItem>, SpotifyApiError | CurlProcessError>
+  ) => Effect.Effect<Page<PlayListItem>, SpotifyApiError | CurlProcessError>
   readonly listSavedTracks: (
     token: string,
     continuation?: Continuation | null

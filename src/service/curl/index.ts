@@ -26,32 +26,31 @@ const CurlResponse = Schema.Struct({
 })
 export type CurlResponse = typeof CurlResponse.Type
 
-export const buildCurlArgs = Effect.fn("SpotUI/buildCurlArgs")(
-  (request: CurlRequest): Effect.Effect<readonly string[], never> =>
-    Effect.gen(function* () {
-      const args = [
-        "curl",
-        "--fail-with-body",
-        "--silent",
-        "--show-error",
-        "--request",
-        request.method,
-      ]
+export const buildCurlArgs = Effect.fn("SpotUI/buildCurlArgs")((
+  request: CurlRequest
+): Effect.Effect<readonly string[], never> => {
+  const args = [
+    "curl",
+    "--fail-with-body",
+    "--silent",
+    "--show-error",
+    "--request",
+    request.method,
+  ]
 
-      const headers = request.headers ?? {}
-      for (const [name, value] of Object.entries(headers)) {
-        args.push("--header", `${name}: ${value}`)
-      }
+  const headers = request.headers ?? {}
+  for (const [name, value] of Object.entries(headers)) {
+    args.push("--header", `${name}: ${value}`)
+  }
 
-      if (request.form) {
-        args.push("--data", new URLSearchParams(request.form).toString())
-      }
+  if (request.form) {
+    args.push("--data", new URLSearchParams(request.form).toString())
+  }
 
-      args.push("--write-out", "\\n%{http_code}")
-      args.push(request.url.toString())
-      return args
-    })
-)
+  args.push("--write-out", "\\n%{http_code}")
+  args.push(request.url.toString())
+  return Effect.succeed(args)
+})
 
 export interface Interface {
   readonly run: (
