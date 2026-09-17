@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson 3: Typed Decoding Errors</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+<main>
+  <p class="kicker">Lesson 03 / about 10 minutes</p>
+  <h1>Decode generically. Fail specifically.</h1>
+  <p class="lede">A transport service can decode any caller-supplied schema without knowing the domain, as long as each boundary reports the right failure.</p>
+
+  <div class="callout">
+    <strong>Win for this lesson:</strong> You will be able to design the error channel of a generic <code>runJson</code> method without collapsing different failures into <code>unknown</code>.
+  </div>
+
+  <h2>1. Two different parsing failures</h2>
+  <table>
+    <thead><tr><th>Failure</th><th>Example</th><th>Effect error</th></tr></thead>
+    <tbody>
+      <tr><td>JSON syntax failure</td><td><code>{ "items": </code></td><td><code>CurlJsonError</code></td></tr>
+      <tr><td>Schema mismatch</td><td><code>{ "items": 42 }</code> when an array is required</td><td><code>SchemaError</code></td></tr>
+    </tbody>
+  </table>
+  <p>Both are failures, but they carry different information. Syntax failure means the body was not JSON. Schema failure means it was JSON, but not the shape this caller requested.</p>
+
+  <h2>2. Choose the Effect constructor by the boundary</h2>
+  <p><code>JSON.parse</code> is synchronous and may throw, so use <code>Effect.try</code>, not <code>Effect.tryPromise</code>:</p>
+  <pre><code>const parseJson = Effect.fn("CurlService.parseJson")((stdout: string) =&gt;
+  Effect.try({
+    try: () =&gt; JSON.parse(stdout) as unknown,
+    catch: (cause) =&gt; new CurlJsonError({
+      stdout,
+      message: "The curl response was not valid JSON.",
+      cause
+    })
+  })
+)</code></pre>
+  <p>The constructor choice communicates what kind of external boundary is involved:</p>
+  <ul>
+    <li><code>Effect.try</code> catches synchronous exceptions.</li>
+    <li><code>Effect.tryPromise</code> catches Promise rejection and receives an abort signal.</li>
+    <li><code>Schema.decodeUnknownEffect</code> validates unknown data and returns a typed schema failure.</li>
+  </ul>
+
+  <h2>3. Compose the boundaries</h2>
+  <pre><code>const runJson = Effect.fn("CurlService.runJson")(
+  function* (schema, request) {
+    const response = yield* attempt(request)
+    const json = yield* parseJson(response.stdout)
+    return yield* Schema.decodeUnknownEffect(schema)(json)
+  }
+)</code></pre>
+  <p>Read the failures from top to bottom:</p>
+  <pre><code>attempt:   Effect&lt;CurlResponse, CurlProcessError&gt;
+parseJson: Effect&lt;unknown, CurlJsonError&gt;
+
+runJson:   Effect&lt;S["Type"],
+             CurlProcessError | CurlJsonError | SchemaError,
+             S["DecodingServices"]&gt;</code></pre>
+  <p>Each <code>yield*</code> keeps the success value flowing and unions the failures. This is why typed Effect composition is useful for interface design: the compiler makes the contract accumulate.</p>
+
+  <h2>4. The schema stays with the caller</h2>
+  <pre><code>// auth.ts
+yield* curl.runJson(RawTokenResponseSchema, refreshTokenRequest(credentials))
+
+// spotifyApi.ts
+yield* curl.runJson(RawPlaylistsResponseSchema, get(token, playlistsUrl))</code></pre>
+  <p>The curl service implements the mechanics once. The caller selects the meaning. This is a deep boundary: generic transport below, domain interpretation above.</p>
+
+  <section class="quiz" data-quiz>
+    <p class="quiz-question">Which failure means the body was valid JSON but the requested shape was wrong?</p>
+    <div class="quiz-options">
+      <button data-answer="wrong">Curl process</button>
+      <button data-answer="correct">Schema error</button>
+      <button data-answer="wrong">JSON syntax</button>
+    </div>
+    <p class="feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>Practice</h2>
+  <ol>
+    <li>Why should <code>JSON.parse</code> use <code>Effect.try</code>?</li>
+    <li>What are the three failure categories that <code>runJson</code> should preserve?</li>
+    <li>What does <code>S["DecodingServices"]</code> suggest about the environment channel?</li>
+  </ol>
+  <p>Reply with your three answers. Next we will design the error type itself and decide which data is safe to retain in it.</p>
+
+  <p class="footer-note">Primary source: <a href="../.opencode/references/effect-smol/packages/effect/src/Schema.ts#L1347">effect-smol schema decoding</a>. Related sources: <a href="../.opencode/references/effect-smol/ai-docs/src/01_effect/03_services/01_service.ts">Context.Service</a> and <a href="../.opencode/references/effect-smol/packages/effect/src/Effect.ts#L1958">Effect.flatMap</a>. Return to <a href="./0002-service-layers-and-schema-contracts.html">Lesson 2</a> or consult the <a href="../reference/effect-interface-cheatsheet.html">cheat sheet</a>.</p>
+</main>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

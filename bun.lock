@@ -8,6 +8,7 @@
         "@lox-audioserver/node-librespot": "^0.5.1",
         "@opentui/core": "^0.5.10",
         "@opentui/react": "^0.5.10",
+        "@tuiparts/react": ">=0.0.1 <0.1.0",
         "effect": "^4.0.0-rc.112",
         "react": "^19.2.8",
       },
@@ -54,6 +55,10 @@
     "@opentui/core-win32-x64": ["@opentui/core-win32-x64@0.5.10", "", { "os": "win32", "cpu": "x64" }, "sha512-u3KHa7kEeWrmKVDRJYpxSGO+g5E9cMGlrmTsPN3GVPHUmQMiREUawLXUvsU8+IHaQnqG3Q5nuE1yf4fPBzS+Qw=="],
 
     "@opentui/react": ["@opentui/react@0.5.10", "", { "dependencies": { "@opentui/core": "0.5.10", "react-reconciler": "^0.33.0" }, "peerDependencies": { "react": ">=19.2.0", "react-devtools-core": "^7.0.1", "ws": "^8.18.0" } }, "sha512-76UFqe/ML121Skjche2+mGX56GKTlwG3ftrOi3b7WGLvjGucPqgEDJ0+CmaC/Yk85O8ui/ZTZJ2tay/8foR4FQ=="],
+
+    "@tuiparts/core": ["@tuiparts/core@0.0.6", "", { "peerDependencies": { "@opentui/core": "^0.4.3" } }, "sha512-DNqtRprlpMJGUHVTm+L0R/P2Gbn392NZdzna8YSPQkgfNjyroSKpZieg1jTTnYAQn7cz5LpiwtDjw3RCUBrulw=="],
+
+    "@tuiparts/react": ["@tuiparts/react@0.0.6", "", { "dependencies": { "@tuiparts/core": "^0.0.6" }, "peerDependencies": { "@opentui/core": "^0.4.3", "@opentui/react": "^0.4.3", "react": ">=19.2.0 <20" } }, "sha512-l2RrM3o2ewh3eWYDwtoOWSZzl67qRHtmPUNngmhaWpi6pF2Qq9lSuJaLq+mQQ8NvObJvUx0Dl3ZLMO9iqiOeCg=="],
 
     "@types/bun": ["@types/bun@1.4.0", "", { "dependencies": { "bun-types": "1.4.0" } }, "sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ=="],
 
