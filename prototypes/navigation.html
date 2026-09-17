@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SpotUI navigation prototype</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111018;
+      --panel: #1a1a2e;
+      --panel-2: #1d2430;
+      --line: #6f685d;
+      --muted: #9f9788;
+      --text: #ede7da;
+      --accent: #f4a51c;
+      --accent-2: #d7c5a1;
+      --danger: #f97316;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 24px 24px 88px;
+      background: #111018;
+      color: var(--text);
+      font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    button, input { font: inherit; }
+    button {
+      border: 0;
+      color: inherit;
+      cursor: pointer;
+    }
+    .intro {
+      max-width: 1080px;
+      margin: 0 auto 18px;
+      color: var(--muted);
+    }
+    .intro strong { color: var(--accent); }
+    .terminal {
+      position: relative;
+      max-width: 1080px;
+      min-height: 600px;
+      margin: auto;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      background: var(--bg);
+      box-shadow: 0 20px 70px #0009;
+    }
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+    }
+    .brand { color: var(--accent); font-weight: 700; }
+    .key { color: var(--accent-2); }
+    .muted { color: var(--muted); }
+    .selected { color: var(--bg); background: var(--accent); }
+    .danger { color: var(--danger); }
+    .screen { min-height: 550px; }
+    .row {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      min-height: 34px;
+      padding: 7px 12px;
+    }
+    .row .marker { width: 18px; color: var(--accent-2); }
+    .selected .marker { color: var(--bg); }
+    .row .meta { margin-left: auto; color: var(--muted); }
+    .section-title {
+      padding: 16px 12px 7px;
+      color: var(--accent-2);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .columns { display: grid; grid-template-columns: 210px 1fr 250px; min-height: 550px; }
+    .rail {
+      border-right: 1px solid var(--line);
+      background: #0e1319;
+      padding: 14px 0;
+    }
+    .rail .row { padding-left: 16px; }
+    .main { padding: 14px 18px; }
+    .detail {
+      border-left: 1px solid var(--line);
+      padding: 18px;
+      background: #0e1319;
+    }
+    .detail h2 { margin: 0 0 14px; color: var(--accent); font-size: 16px; }
+    .detail p { color: var(--muted); }
+    .cover {
+      display: grid;
+      place-items: center;
+      width: 100%;
+      aspect-ratio: 1;
+      margin-bottom: 14px;
+      border: 1px solid var(--line);
+      color: var(--accent-2);
+      background: repeating-linear-gradient(45deg, #182028 0 8px, #10161c 8px 16px);
+      font-size: 28px;
+    }
+    .palette {
+      position: absolute;
+      z-index: 4;
+      inset: 76px 20% auto;
+      border: 1px solid var(--accent);
+      background: #10161ded;
+      box-shadow: 0 18px 50px #000b;
+    }
+    .palette-header { padding: 12px; border-bottom: 1px solid var(--line); color: var(--muted); }
+    .palette-header input {
+      width: 100%;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text);
+    }
+    .palette-list { padding: 8px; }
+    .command { display: flex; justify-content: space-between; padding: 8px; }
+    .command.active { color: var(--bg); background: var(--accent); }
+    .command small { color: var(--muted); }
+    .command.active small { color: #26403c; }
+    .switcher {
+      position: fixed;
+      z-index: 5;
+      bottom: 22px;
+      left: 50%;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      transform: translateX(-50%);
+      padding: 9px 14px;
+      border: 1px solid var(--accent-2);
+      border-radius: 999px;
+      background: #171e27f2;
+      box-shadow: 0 8px 30px #000b;
+    }
+    .switcher button { background: transparent; color: var(--accent-2); }
+    .switcher strong { color: var(--text); white-space: nowrap; }
+    .help { padding: 12px 16px; border-top: 1px solid var(--line); color: var(--muted); }
+
+    /* Variant B: a single breadcrumb stack, no permanent rail. */
+    .stack { padding: 20px 24px; }
+    .crumbs { margin-bottom: 26px; color: var(--muted); }
+    .crumbs strong { color: var(--text); }
+    .stack-layout { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 30px; }
+    .stack-list { border-top: 1px solid var(--line); }
+    .stack-list .row { border-bottom: 1px solid var(--line); min-height: 46px; }
+    .stack-list .selected { padding-left: 18px; }
+    .stack-aside { border-left: 1px solid var(--line); padding-left: 22px; }
+    .stack-aside h2 { margin-top: 0; color: var(--accent); font-size: 15px; }
+
+    /* Variant C: command-first dashboard with a shallow navigation model. */
+    .command-first { padding: 18px 22px; }
+    .command-first h1 { margin: 4px 0 5px; color: var(--accent); font-size: 21px; }
+    .command-first .lead { color: var(--muted); margin-bottom: 28px; }
+    .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-width: 720px; }
+    .tile { min-height: 120px; padding: 18px; border: 1px solid var(--line); background: var(--panel); }
+    .tile.selected { color: var(--text); border-color: var(--accent); background: var(--panel-2); }
+    .tile b { display: block; margin-bottom: 12px; color: var(--accent-2); }
+    .tile.selected b { color: var(--accent); }
+    .tile span { color: var(--muted); }
+    .recent { max-width: 720px; margin-top: 28px; }
+
+    @media (max-width: 800px) {
+      body { padding: 12px 12px 82px; }
+      .columns { grid-template-columns: 150px 1fr; }
+      .detail { display: none; }
+      .palette { inset-inline: 8%; }
+      .stack-layout { grid-template-columns: 1fr; }
+      .stack-aside { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="intro">
+    <strong>PROTOTYPE - THROWAWAY</strong><br>
+    This explores the first-release SpotUI navigation question: should playlists and saved libraries feel like a rail, a breadcrumb stack, or a command-first dashboard? Try each variant with <span class="key">j/k</span> or arrow keys, <span class="key">Enter</span>, <span class="key">b</span>, <span class="key">r</span>, and <span class="key">Ctrl-P</span>. Text input belongs only to the library-search command.
+    <br><span class="muted">Theme direction: ghui palette and fixed/system tone model.</span>
+  </div>
+  <main class="terminal" id="terminal"></main>
+  <nav class="switcher" aria-label="Prototype variants">
+    <button id="previous" aria-label="Previous variant">&lt;</button>
+    <strong id="variant-label"></strong>
+    <button id="next" aria-label="Next variant">&gt;</button>
+  </nav>
+
+  <script>
+    // Question: which navigation hierarchy and command model should SpotUI carry into OpenTUI?
+    // This is a self-contained interaction prototype, not production code.
+    const variants = {
+      A: "Library rail",
+      B: "Breadcrumb stack",
+      C: "Command-first",
+    };
+    const collections = [
+      ["Playlists", "24 playlists"],
+      ["Saved tracks", "418 tracks"],
+      ["Saved albums", "63 albums"],
+      ["Followed artists", "92 artists"],
+    ];
+    const playlistRows = [
+      ["Liked from radio", "128 tracks"],
+      ["Late night coding", "64 tracks"],
+      ["Weekend records", "37 tracks"],
+      ["Road trip", "91 tracks"],
+      ["Unsorted", "12 tracks"],
+    ];
+    const trackRows = [
+      ["01", "Teardrop", "Massive Attack"],
+      ["02", "Everything In Its Right Place", "Radiohead"],
+      ["03", "Archangel", "Burial"],
+      ["04", "A New Error", "Moderat"],
+      ["05", "Two Weeks", "FKA twigs"],
+    ];
+    const commands = [
+      ["Go to playlists", "g p"],
+      ["Go to saved tracks", "g t"],
+      ["Go to saved albums", "g a"],
+      ["Go to followed artists", "g f"],
+      ["Go back", "b"],
+      ["Refresh current view", "r"],
+      ["Retry failed request", "R"],
+      ["Search library", "text"],
+      ["Quit", "q"],
+    ];
+    const state = {
+      variant: new URLSearchParams(location.search).get("variant")?.toUpperCase() in variants
+        ? new URLSearchParams(location.search).get("variant").toUpperCase()
+        : "A",
+      screen: "collections",
+      selected: 0,
+      palette: false,
+      paletteSelected: 0,
+      searchMode: false,
+      notice: "Ready - choose a collection",
+    };
+
+    const terminal = document.querySelector("#terminal");
+    const paletteMarkup = () => {
+      if (!state.palette) return "";
+      const visible = commands
+        .map((command, index) => ({ command, index }))
+        .filter(({ command }) => !state.searchMode || command[0].toLowerCase().includes(state.searchMode.toLowerCase()));
+      return `<section class="palette" role="dialog" aria-label="Command palette">
+        <div class="palette-header">${state.searchMode ? `<input id="search-input" autofocus placeholder="Search library..." value="${state.searchMode}">` : "COMMAND PALETTE - j/k select, Enter run, Esc close"}</div>
+        <div class="palette-list">${visible.map(({ command, index }, visibleIndex) => `<div class="command ${visibleIndex === state.paletteSelected ? "active" : ""}"><span>${command[0]}</span><small>${command[1]}</small></div>`).join("")}</div>
+      </section>`;
+    };
+    const rows = (items, selected) => items.map((item, index) => `<div class="row ${index === selected ? "selected" : ""}"><span class="marker">${index === selected ? ">" : " "}</span><span>${item[0]}</span><span class="meta">${item[1] ?? ""}</span></div>`).join("");
+    const trackList = () => trackRows.map((item, index) => `<div class="row ${index === state.selected ? "selected" : ""}"><span class="marker">${index === state.selected ? ">" : " "}</span><span class="muted">${item[0]}</span><span>${item[1]}</span><span class="meta">${item[2]}</span></div>`).join("");
+
+    function renderA() {
+      const left = state.screen === "collections" ? collections : [["Back to collections", "b"], ...playlistRows];
+      const title = state.screen === "collections" ? "Your library" : "Playlists";
+      return `<div class="topbar"><span><span class="brand">SPOTUI</span> / ${title}</span><span><span class="key">Ctrl-P</span> commands</span></div>
+        <div class="columns"><aside class="rail"><div class="section-title">Library</div>${rows(collections, state.screen === "collections" ? state.selected : -1)}<div class="section-title">Session</div>${rows([["Refresh", "r"], ["Quit", "q"]], -1)}</aside>
+        <section class="main"><div class="section-title">${title}</div>${state.screen === "collections" ? rows(collections, state.selected) : rows([["Back to collections", "b"], ...playlistRows], state.selected)}<div class="help">${state.notice}</div></section>
+        <aside class="detail"><div class="cover">${state.screen === "collections" ? "LIB" : "MIX"}</div><h2>${state.screen === "collections" ? "Browse your library" : "Late night coding"}</h2><p>${state.screen === "collections" ? "Select a collection to open it." : "64 tracks. Enter to open tracks."}</p></aside></div>${paletteMarkup()}`;
+    }
+    function renderB() {
+      const title = state.screen === "collections" ? "Library" : "Playlists / Late night coding";
+      const items = state.screen === "collections" ? collections : playlistRows;
+      return `<div class="topbar"><span><span class="brand">SPOTUI</span> ${title}</span><span><span class="key">b</span> back <span class="key">Ctrl-P</span> palette</span></div>
+        <div class="stack"><div class="crumbs">home / <strong>${title.toLowerCase()}</strong></div><div class="stack-layout"><section><div class="section-title">${state.screen === "collections" ? "Choose a collection" : "Playlist tracks"}</div><div class="stack-list">${rows(items, state.selected)}</div><div class="help">${state.notice}</div></section><aside class="stack-aside"><h2>Context</h2><p class="muted">${state.screen === "collections" ? "A quiet, single-column path through the library." : "The list stays focused while details remain secondary."}</p><p><span class="key">Enter</span> open<br><span class="key">b</span> back<br><span class="key">r</span> refresh</p></aside></div></div>${paletteMarkup()}`;
+    }
+    function renderC() {
+      const items = state.screen === "collections" ? collections : playlistRows;
+      return `<div class="topbar"><span><span class="brand">SPOTUI</span> command center</span><span><span class="key">Ctrl-P</span> open palette</span></div>
+        <div class="command-first"><h1>What do you want to browse?</h1><div class="lead">The command palette is the primary navigation. Direct keys remain shortcuts.</div><section class="tiles">${items.map((item, index) => `<div class="tile ${index === state.selected ? "selected" : ""}"><b>${index + 1}. ${item[0]}</b><span>${item[1]}</span></div>`).join("")}</section><section class="recent"><div class="section-title">Recent command</div><div class="row"><span class="marker">*</span><span>${state.notice}</span></div></section></div>${paletteMarkup()}`;
+    }
+    function render() {
+      terminal.innerHTML = state.variant === "A" ? renderA() : state.variant === "B" ? renderB() : renderC();
+      document.querySelector("#variant-label").textContent = `${state.variant} (${variants[state.variant]})`;
+      const search = document.querySelector("#search-input");
+      if (search) {
+        search.focus();
+        search.addEventListener("input", (event) => { state.searchMode = event.target.value; state.paletteSelected = 0; render(); });
+      }
+    }
+    function setVariant(value) {
+      state.variant = value;
+      history.replaceState(null, "", `?variant=${value}`);
+      render();
+    }
+    function move(direction) {
+      const limit = state.palette ? commands.length : (state.screen === "collections" ? collections.length : playlistRows.length);
+      state[state.palette ? "paletteSelected" : "selected"] = (state[state.palette ? "paletteSelected" : "selected"] + direction + limit) % limit;
+      render();
+    }
+    function runSelectedCommand() {
+      if (!state.palette) {
+        if (state.screen === "collections") { state.screen = "playlist"; state.selected = 0; state.notice = "Opened Playlists - Enter opens the selected collection"; }
+        else if (state.selected === 0) { state.screen = "collections"; state.selected = 0; state.notice = "Back at your library"; }
+        else { state.notice = "Opened playlist - its tracks are ready to browse"; }
+        return render();
+      }
+      const command = commands[state.paletteSelected][0];
+      state.palette = false;
+      state.searchMode = false;
+      if (command === "Go back") { state.screen = "collections"; state.selected = 0; }
+      else if (command === "Go to playlists") { state.screen = "playlist"; state.selected = 0; }
+      else if (command === "Refresh current view") { state.notice = "Refreshing - old rows remain visible"; }
+      else if (command === "Retry failed request") { state.notice = "Retrying the current request"; }
+      else if (command === "Search library") { state.palette = true; state.searchMode = ""; }
+      else if (command === "Quit") { state.notice = "Quit requested - the real app would exit"; }
+      else { state.notice = `${command} selected`; }
+      render();
+    }
+    document.addEventListener("keydown", (event) => {
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" && event.key !== "Escape" && event.key !== "Enter") return;
+      if (event.key === "Escape") { state.palette = false; state.searchMode = false; return render(); }
+      if ((event.ctrlKey && event.key.toLowerCase() === "p") || event.key === "/") { event.preventDefault(); state.palette = true; state.searchMode = false; state.paletteSelected = 0; return render(); }
+      if (event.key === "ArrowDown" || event.key.toLowerCase() === "j") { event.preventDefault(); return move(1); }
+      if (event.key === "ArrowUp" || event.key.toLowerCase() === "k") { event.preventDefault(); return move(-1); }
+      if (event.key === "Enter") { event.preventDefault(); return runSelectedCommand(); }
+      if (event.key.toLowerCase() === "b" || event.key === "Backspace") { state.screen = "collections"; state.selected = 0; state.notice = "Back at your library"; return render(); }
+      if (event.key.toLowerCase() === "r") { state.notice = "Refreshing - old rows remain visible"; return render(); }
+      if (event.key.toLowerCase() === "q") { state.notice = "Quit requested - the real app would exit"; return render(); }
+    });
+    document.querySelector("#previous").addEventListener("click", () => setVariant({ A: "C", B: "A", C: "B" }[state.variant]));
+    document.querySelector("#next").addEventListener("click", () => setVariant({ A: "B", B: "C", C: "A" }[state.variant]));
+    render();
+  </script>
+</body>
+</html>

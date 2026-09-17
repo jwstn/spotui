@@ -4,15 +4,19 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "bun run --watch src/index.tsx"
+    "dev": "bun run --watch src/index.tsx",
+    "test": "bun test test/*.test.ts",
+    "typecheck": "bunx tsc --noEmit --pretty false"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/react": "^19.3.0"
   },
   "peerDependencies": {
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@lox-audioserver/node-librespot": "^0.5.1",
     "@opentui/core": "^0.5.10",
     "@opentui/react": "^0.5.10",
     "effect": "^4.0.0-rc.112",
