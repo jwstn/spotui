@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson 8: The Curl Interface Capstone</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+<main>
+  <p class="kicker">Lesson 08 / about 15 minutes</p>
+  <h1>Assemble the boundary.</h1>
+  <p class="lede">Turn the lessons into one interface that makes the current curl mistakes difficult to express.</p>
+
+  <div class="callout">
+    <strong>Win for this lesson:</strong> You will be able to review a curl interface by its guarantees and identify which implementation layer owns each guarantee.
+  </div>
+
+  <h2>1. The public contract</h2>
+  <p>A target shape is:</p>
+  <pre><code>interface CurlServiceShape {
+  readonly runJson: &lt;S extends Schema.Constraint&gt;(
+    schema: S,
+    request: CurlRequest
+  ) =&gt; Effect.Effect&lt;
+    S["Type"],
+    CurlProcessError | CurlJsonError | Schema.SchemaError,
+    S["DecodingServices"]
+  &gt;
+}</code></pre>
+  <p>The exact names may change with the Effect version, but the contract says four important things:</p>
+  <ul>
+    <li>The caller chooses the response schema.</li>
+    <li>The result is decoded, not <code>unknown</code>.</li>
+    <li>Transport, JSON, and schema failures remain distinguishable.</li>
+    <li>Schema-required decoding services are not silently erased.</li>
+  </ul>
+
+  <h2>2. Assign each guarantee</h2>
+  <table>
+    <thead><tr><th>Guarantee</th><th>Owning boundary</th></tr></thead>
+    <tbody>
+      <tr><td>Valid request values</td><td>Request schema and request constructor</td></tr>
+      <tr><td>Correct curl arguments</td><td>Pure argument builder</td></tr>
+      <tr><td>Process exit and stream cleanup</td><td><code>runProcess</code></td></tr>
+      <tr><td>Timeout interruption</td><td><code>runProcess</code> plus <code>Effect.timeoutOrElse</code></td></tr>
+      <tr><td>HTTP status classification</td><td><code>attempt</code> or transport response classifier</td></tr>
+      <tr><td>Retry decision</td><td>Structured error plus <code>Schedule</code></td></tr>
+      <tr><td>JSON syntax decoding</td><td><code>runJson</code></td></tr>
+      <tr><td>Spotify response meaning</td><td><code>AuthService</code> or <code>SpotifyApi</code></td></tr>
+      <tr><td>Live versus fake implementation</td><td><code>Layer</code> composition</td></tr>
+    </tbody>
+  </table>
+
+  <h2>3. The wiring rule</h2>
+  <pre><code>// Focused service layer: requires CurlService
+const SpotifyApiLive = Layer.effect(SpotifyApi, ...)
+
+// Application wiring: choose the implementation once
+const LiveAppLayer = SpotifyApiLive.pipe(
+  Layer.provide(CurlServiceLive)
+)
+
+// Test wiring: substitute without changing SpotifyApi
+const TestAppLayer = SpotifyApiLive.pipe(
+  Layer.provide(CurlServiceTest)
+)</code></pre>
+  <p>This is the interface payoff. The Spotify API layer cannot accidentally replace a test dependency with a live process implementation.</p>
+
+  <h2>4. Review the current mistakes</h2>
+  <p>A sound interface and ownership model exposes the current failures:</p>
+  <ul>
+    <li>The misspelled curl flag belongs to argument construction tests.</li>
+    <li>The nested Effect belongs to generator sequencing.</li>
+    <li>The missing status parsing belongs to transport response classification.</li>
+    <li>The missing HTTP failure mapping belongs to the transport error boundary.</li>
+    <li>Raw credentials in error args violate the error data contract.</li>
+    <li>Unawaited process cleanup violates the process ownership contract.</li>
+    <li>Hidden live layer provisioning violates dependency composition.</li>
+  </ul>
+
+  <section class="quiz" data-quiz>
+    <p class="quiz-question">Which layer should SpotifyApiLive require rather than secretly provide?</p>
+    <div class="quiz-options">
+      <button data-answer="correct">Curl service</button>
+      <button data-answer="wrong">JSON schema</button>
+      <button data-answer="wrong">Process stderr</button>
+    </div>
+    <p class="feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>Capstone practice</h2>
+  <ol>
+    <li>Write the one-sentence guarantee of <code>CurlService.runJson</code>.</li>
+    <li>Name the three failure families it should expose.</li>
+    <li>State one reason <code>SpotifyApiLive</code> must not provide the live curl layer internally.</li>
+  </ol>
+  <p>Reply with your three answers. After that, we can either design the implementation step-by-step or begin a test-first repair of <code>src/service/curl.ts</code>.</p>
+
+  <p class="footer-note">Primary sources: <a href="../.opencode/references/effect-smol/ai-docs/src/01_effect/03_services/20_layer-composition.ts">effect-smol layer composition</a>, <a href="../.opencode/references/effect-smol/ai-docs/src/09_testing/20_layer-tests.ts">layer tests</a>, and <a href="../.opencode/references/effect-smol/packages/effect/src/Effect.ts#L13565">Effect.fn</a>. Return to <a href="./0007-live-and-test-layers.html">Lesson 7</a>.</p>
+</main>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

@@ -5,10 +5,10 @@ import type {
 } from "@lox-audioserver/node-librespot"
 import {
   createSessionWithCredentials,
-  loginWithAccessToken,
   setLogLevel,
+  startZeroconfLogin,
 } from "@lox-audioserver/node-librespot"
-import type { PlaybackCredentials } from "./config"
+import type { PlaybackCredentials } from "./service/config"
 
 const SAMPLE_RATE = 44100
 const CHANNELS = 2
@@ -134,22 +134,37 @@ export interface PlaybackHostInput {
 }
 
 /**
- * Exchange a keymaster-minted OAuth token for reusable librespot login5
- * credentials. Returns null when playback is unauthorized (e.g. a Free
- * account) so login can still finish with read-only browsing.
+ * Pair playback via Spotify's Zeroconf handshake: a temporary `SpotUI` device
+ * is advertised locally and the user picks it in the Spotify app, which hands
+ * over reusable stored credentials. This is the only playback-authorization
+ * path Spotify still accepts (the OAuth-token borrow in `loginWithAccessToken`
+ * was deprecated in August 2026).
  */
-export const capturePlaybackCredentials = async (
-  accessToken: string
-): Promise<PlaybackCredentials | null> => {
-  try {
-    const result = await loginWithAccessToken(accessToken)
-    const credentialsJson =
-      result.credentialsJson ?? result.credentials_json ?? ""
-    if (!credentialsJson) return null
-    return { username: result.username, credentialsJson }
-  } catch {
-    return null
+export const pairPlaybackCredentials = async (opts: {
+  readonly deviceId: string
+  readonly name: string
+  readonly timeoutMs: number
+}): Promise<PlaybackCredentials> => {
+  const result = await startZeroconfLogin(
+    opts.deviceId,
+    opts.name,
+    opts.timeoutMs
+  )
+  const raw = result as unknown as {
+    username?: string
+    credentialsJson?: string
+    credentials_json?: string
   }
+  const credentialsJson =
+    typeof raw?.credentialsJson === "string"
+      ? raw.credentialsJson
+      : typeof raw?.credentials_json === "string"
+        ? raw.credentials_json
+        : ""
+  if (!credentialsJson) {
+    throw new Error("Zeroconf pairing returned no credentials")
+  }
+  return { username: raw.username ?? "", credentialsJson }
 }
 
 const toPlaybackEvent = (event: ConnectEvent): PlaybackEvent | null => {

@@ -18,7 +18,9 @@
   "dependencies": {
     "@lox-audioserver/node-librespot": "^0.5.1",
     "@opentui/core": "^0.5.10",
+    "@opentui/keymap": "^0.5.11",
     "@opentui/react": "^0.5.10",
+    "@tuiparts/react": ">=0.0.1 <0.1.0",
     "effect": "^4.0.0-rc.112",
     "react": "^19.2.8"
   }
