@@ -1,3 +1,4 @@
+import * as Schema from "effect/Schema"
 import type {
   ConnectEvent,
   LibrespotSession,
@@ -14,10 +15,14 @@ const SAMPLE_RATE = 44100
 const CHANNELS = 2
 const FALLBACK_BITRATE = 320
 
-export interface PcmOutput {
-  readonly write: (chunk: Uint8Array) => boolean
-  readonly dispose: () => void
-}
+export const PcmOutput = Schema.Struct({
+  write: (chunk: Uint8Array) => Schema.Boolean,
+  dispose: () => Schema.Void,
+})
+// export interface PcmOutput {
+//   readonly write: (chunk: Uint8Array) => boolean
+// readonly dispose: () => void
+// }
 
 export const playerCommandFor = (
   available: (command: string) => boolean

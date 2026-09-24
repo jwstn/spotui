@@ -12,13 +12,15 @@ import type {
 import { CurlService, CurlServiceLive } from "#/service/curl"
 import { CurlProcessError } from "#/service/curl/error"
 import {
-  RawAlbumTracksResponseSchema,
-  RawFollowingPageSchema,
-  RawPlaylistItemsResponseSchema,
-  RawPlaylistsResponseSchema,
-  RawSavedAlbumsResponseSchema,
-  RawSavedTracksResponseSchema,
-} from "../spotifySchemas"
+  RawAlbum,
+  RawAlbumTracksResponse,
+  RawFollowingPage,
+  RawPlaylistItemsResponse,
+  RawPlaylistsResponse,
+  RawSavedAlbumsResponse,
+  RawSavedTracksResponse,
+} from "#/spotifySchemas"
+
 import {
   normalizeAlbum,
   normalizeArtist,
@@ -27,7 +29,7 @@ import {
   normalizeTrack,
   pageFromFollowing,
   pageFromOffset,
-} from "../spotifyNormalize"
+} from "#/spotifyNormalize"
 
 const API_BASE = "https://api.spotify.com/v1"
 
@@ -112,7 +114,7 @@ export const SpotifyApiLive = Layer.effect(
       (token: string, continuation?: Continuation | null) =>
         curl
           .runJson(
-            RawPlaylistsResponseSchema,
+            RawPlaylistsResponse,
             get(
               token,
               urlForContinuation(`${API_BASE}/me/playlists`, continuation)
@@ -141,7 +143,7 @@ export const SpotifyApiLive = Layer.effect(
       (token: string, playlistId: string, continuation?: Continuation | null) =>
         curl
           .runJson(
-            RawPlaylistItemsResponseSchema,
+            RawPlaylistItemsResponse,
             get(
               token,
               urlForContinuation(
@@ -182,7 +184,7 @@ export const SpotifyApiLive = Layer.effect(
       (token: string, continuation?: Continuation | null) =>
         curl
           .runJson(
-            RawSavedTracksResponseSchema,
+            RawSavedTracksResponse,
             get(
               token,
               urlForContinuation(`${API_BASE}/me/tracks`, continuation)
@@ -214,7 +216,7 @@ export const SpotifyApiLive = Layer.effect(
       (token: string, continuation?: Continuation | null) =>
         curl
           .runJson(
-            RawSavedAlbumsResponseSchema,
+            RawSavedAlbumsResponse,
             get(
               token,
               urlForContinuation(`${API_BASE}/me/albums`, continuation)
@@ -250,7 +252,7 @@ export const SpotifyApiLive = Layer.effect(
         continuation?.kind === "cursor" ? continuation.after : undefined
       return curl
         .runJson(
-          RawFollowingPageSchema,
+          RawFollowingPage,
           get(
             token,
             `${API_BASE}/me/following${query({ type: "artist", limit: 25, after })}`
@@ -280,7 +282,7 @@ export const SpotifyApiLive = Layer.effect(
       (token: string, albumId: string, continuation?: Continuation | null) =>
         curl
           .runJson(
-            RawAlbumTracksResponseSchema,
+            RawAlbumTracksResponse,
             get(
               token,
               urlForContinuation(

@@ -129,6 +129,14 @@ export const CurlServiceLive = Layer.effect(
       })
     )
 
-    return CurlService.of({ run })
+    const runJson = Effect.fn("CurlService/runJSON")((request: CurlRequest) =>
+      Effect.gen(function* () {
+        return yield* run(request).pipe(
+          Effect.tap((value) => Effect.sync(() => console.log(value)))
+        )
+      })
+    )
+
+    return CurlService.of({ run, runJson })
   })
 )
