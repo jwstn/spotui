@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson 5: Retry Policy With Schedule</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+<main>
+  <p class="kicker">Lesson 05 / about 10 minutes</p>
+  <h1>Retry policy belongs in structured errors.</h1>
+  <p class="lede">Use Effect's retry machinery without turning messages into an accidental protocol.</p>
+
+  <div class="callout">
+    <strong>Win for this lesson:</strong> You will be able to explain why HTTP failures must enter the error channel before <code>Effect.retry</code> can handle them.
+  </div>
+
+  <h2>1. Retry only sees failures</h2>
+  <p><code>Effect.retry</code> retries when an Effect fails according to a <code>Schedule</code>. It does not inspect a successful value looking for an HTTP status.</p>
+  <pre><code>request
+  -&gt; process exits with HTTP 503
+  -&gt; classify as CurlProcessError(kind: "http")
+  -&gt; Effect.retry sees the error
+  -&gt; schedule decides whether to try again</code></pre>
+  <p>If a 503 response is returned as a successful <code>CurlResponse</code>, the retry policy cannot see it. This is why status classification belongs inside the curl transport boundary.</p>
+
+  <h2>2. Structured policy beats message matching</h2>
+  <pre><code>type RetryableCurlError = {
+  kind: "process" | "timeout" | "http"
+  statusCode: number | null
+  retryAfterSeconds: number | null
+}
+
+const isRetryable = (error: RetryableCurlError) =&gt;
+  error.kind === "process" ||
+  error.kind === "timeout" ||
+  (error.statusCode !== null &amp;&amp; error.statusCode &gt;= 500) ||
+  error.statusCode === 429</code></pre>
+  <p>Do not write policy such as <code>message.includes("timed out")</code>. Messages are for people and may change. Tags and fields are for program behavior.</p>
+
+  <h2>3. Build a schedule</h2>
+  <p>The <a href="../.opencode/references/effect-smol/ai-docs/src/06_schedule/10_schedules.ts">effect-smol schedule example</a> combines a backoff with a retryability predicate:</p>
+  <pre><code>const retrySchedule = Schedule.exponential("300 millis").pipe(
+  Schedule.jittered,
+  Schedule.setInputType&lt;CurlProcessError&gt;(),
+  Schedule.while(({ input }) =&gt; isRetryable(input))
+)
+
+const run = attempt(request).pipe(
+  Effect.retry(retrySchedule)
+)</code></pre>
+  <p>The schedule controls timing and continuation. The typed error controls whether continuation is allowed. A bounded retry count should also be part of the policy.</p>
+
+  <h2>4. Retry-After is data, not decoration</h2>
+  <p>A server may provide a retry delay. If the error stores <code>retryAfterSeconds</code> but the schedule ignores it, the interface contains policy data that the implementation does not honor.</p>
+  <p>That is a design smell: either make the schedule use the field, or do not claim that the field represents the active retry policy. We will handle dynamic delays after the basic retry contract is clear.</p>
+
+  <section class="quiz" data-quiz>
+    <p class="quiz-question">Where must an HTTP 503 be represented for <code>Effect.retry</code> to see it?</p>
+    <div class="quiz-options">
+      <button data-answer="wrong">Success value</button>
+      <button data-answer="correct">Error channel</button>
+      <button data-answer="wrong">Log message</button>
+    </div>
+    <p class="feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>Practice</h2>
+  <ol>
+    <li>Which structured fields should a retry predicate inspect?</li>
+    <li>Why is matching <code>message</code> a fragile retry policy?</li>
+    <li>What is wrong with storing <code>retryAfterSeconds</code> while ignoring it?</li>
+  </ol>
+  <p>Reply with your three answers. Next we will examine timeout interruption and process cleanup.</p>
+
+  <p class="footer-note">Primary source: <a href="../.opencode/references/effect-smol/ai-docs/src/06_schedule/10_schedules.ts">effect-smol schedules</a>. Related reference: <a href="../reference/effect-interface-cheatsheet.html">Effect interface design cheat sheet</a>. Return to <a href="./0004-safe-error-data.html">Lesson 4</a>.</p>
+</main>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

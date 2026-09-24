@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson 2: Service Layers and Schema Contracts</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+<main>
+  <p class="kicker">Lesson 02 / about 10 minutes</p>
+  <h1>Put each promise at the right boundary.</h1>
+  <p class="lede">Keep Bun concrete when that is the real runtime decision, while still making the curl service's semantic contract small and typed.</p>
+
+  <div class="callout">
+    <strong>Win for this lesson:</strong> You will be able to explain why the curl transport should decode a caller-supplied schema without knowing Spotify's domain types.
+  </div>
+
+  <h2>1. Do not abstract imaginary variation</h2>
+  <p>An interface is not automatically better because it hides an implementation. It earns its place when it hides a meaningful policy, protects an invariant, or gives tests control over a real boundary.</p>
+  <p>Your decision to keep Bun concrete is reasonable:</p>
+  <ul>
+    <li>Bun is the committed runtime.</li>
+    <li>A runtime migration is not a current requirement.</li>
+    <li>Child-process behavior can be covered by live tests.</li>
+  </ul>
+  <p>The important distinction is this: <code>R = never</code> means the Effect Context has no required service. It does not mean the operation is pure or has no operating-system behavior.</p>
+
+  <h2>2. Service contract versus implementation</h2>
+  <p>The <a href="../.opencode/references/effect-smol/ai-docs/src/01_effect/03_services/01_service.ts">effect-smol service example</a> separates a service's contract from the layer that constructs it:</p>
+  <pre><code>class CurlService extends Context.Service&lt;CurlService, Interface&gt;()(
+  "SpotUI/CurlService"
+) {}
+
+const CurlServiceLive = Layer.effect(
+  CurlService,
+  Effect.gen(function* () {
+    // build the concrete implementation here
+    return CurlService.of({ runJson })
+  })
+)</code></pre>
+  <p>The service says what callers may use. The layer says how the application supplies it. This lets callers depend on <code>CurlService</code> without knowing whether the implementation uses Bun, curl, or a test implementation.</p>
+
+  <h2>3. Who owns the response schema?</h2>
+  <p>Spotify's auth module knows the token response shape. Spotify's library module knows playlist and track shapes. The curl service should know none of those fields.</p>
+  <pre><code>AuthService
+  - owns RawTokenResponseSchema
+  - asks CurlService to decode it
+
+CurlService
+  - owns process execution
+  - owns status classification
+  - owns JSON parsing
+  - performs decoding using the supplied schema</code></pre>
+  <p>The contract can be conceptually expressed as:</p>
+  <pre><code>runJson(schema, request)
+  -&gt; Effect&lt;Schema.Type&lt;typeof schema&gt;, CurlError | SchemaError, ...&gt;</code></pre>
+  <p>The exact generic spelling is version-sensitive, but the design is stable: the caller supplies the schema, and the transport service supplies the decoding machinery.</p>
+
+  <h2>4. Input schema and output schema are different jobs</h2>
+  <table>
+    <thead><tr><th>Schema</th><th>Owner</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>Request schema</td><td>Transport boundary</td><td>Turn external request data such as URL strings and header records into trusted internal request values.</td></tr>
+      <tr><td>Response schema</td><td>Caller or domain module</td><td>Turn an unknown JSON response into the shape that caller actually understands.</td></tr>
+    </tbody>
+  </table>
+  <p>The current file declares <code>Schema.URL</code> and <code>Schema.Headers</code> as types but never decodes with them. That creates the appearance of validation without the behavior. The <a href="../.opencode/references/effect-smol/packages/effect/src/Schema.ts#L1347">effect-smol schema reference</a> describes <code>Schema.decodeUnknownEffect</code> as the boundary that turns unknown input into a typed Effect failure.</p>
+
+  <h2>5. The composition</h2>
+  <pre><code>const runJson = Effect.fn("CurlService.runJson")(
+  function* (schema, request) {
+    const response = yield* attempt(request)
+    const json = yield* parseJson(response.body)
+    return yield* Schema.decodeUnknownEffect(schema)(json)
+  }
+)</code></pre>
+  <p>Each <code>yield*</code> adds the called operation's failures to the enclosing contract. The curl service does not need to know whether the schema describes a token, playlist, or track.</p>
+
+  <section class="quiz" data-quiz>
+    <p class="quiz-question">Who should own <code>RawTokenResponseSchema</code>?</p>
+    <div class="quiz-options">
+      <button data-answer="wrong">Curl service</button>
+      <button data-answer="correct">Auth service</button>
+      <button data-answer="wrong">Process layer</button>
+    </div>
+    <p class="feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>Practice</h2>
+  <ol>
+    <li>Why is keeping Bun concrete different from hiding the curl service behind no interface at all?</li>
+    <li>What should the curl service know about a Spotify token response?</li>
+    <li>What new failure must a schema-decoding version of <code>runJson</code> expose?</li>
+  </ol>
+  <p>Reply with your three answers. Next we will design the error boundary and decide which failures belong in one <code>CurlError</code> family.</p>
+
+  <p class="footer-note">Primary sources: <a href="../.opencode/references/effect-smol/ai-docs/src/01_effect/03_services/01_service.ts">effect-smol Context.Service example</a> and <a href="../.opencode/references/effect-smol/packages/effect/src/Schema.ts#L1347">effect-smol decoding documentation</a>. See also the <a href="../reference/effect-interface-cheatsheet.html">interface design cheat sheet</a> and <a href="./0001-effect-gen-and-interface-contract.html">Lesson 1</a>. Ask follow-up questions about any tradeoff.</p>
+</main>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>
