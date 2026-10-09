@@ -90,61 +90,72 @@ export const ConfigPathInput = Schema.Struct({
   override: Schema.String,
 })
 
-const join = (parts: readonly string[], separator: "/" | "\\") =>
-  parts
-    .map((part) => part.replace(/^[/\\]+|[/\\]+$/g, ""))
-    .filter(Boolean)
-    .join(separator)
+const isAbsolutePath = (value: Schema.Schema.Type<typeof Schema.String>) =>
+  Effect.succeed(
+    value.startsWith("/") ||
+      /^[A-Za-z]:[\\/]/.test(value) ||
+      value.startsWith("\\\\")
+  )
 
-const isAbsolutePath = (value: string) =>
-  value.startsWith("/") ||
-  /^[A-Za-z]:[\\/]/.test(value) ||
-  value.startsWith("\\\\")
-
-export const configPathFor = (
+export const configPathFor = Effect.fnUntraced(function* (
   platform: ConfigPlatform,
-  home: string,
-  xdgConfigHome?: string
-) => {
+  home: Schema.Schema.Type<typeof Schema.String>,
+  xdgConfigHome: Schema.Schema.Type<typeof Schema.String>
+) {
   if (platform === "linux") {
-    return `${xdgConfigHome ?? `${home}/.config`}/spotui/config.toml`
+    return yield* Effect.succeed(
+      `${xdgConfigHome ?? `${home}/.config`}/spotui/config.toml`
+    )
   }
 
   if (platform === "macos") {
-    return `${home}/Library/Application Support/spotui/config.toml`
+    return yield* Effect.succeed(
+      `${home}/Library/Application Support/spotui/config.toml`
+    )
   }
 
-  return `${home}\\AppData\\Local\\spotui\\config.toml`
-}
+  return yield* Effect.succeed(`${home}\\AppData\\Local\\spotui\\config.toml`)
+})
 
-export const resolveConfigPath = (
-  input: typeof ConfigPathInput.Type
-): ConfigPath => {
-  const override = input.override?.trim()
-  if (override) {
-    return isAbsolutePath(override)
-      ? { kind: "override", path: override }
-      : {
-          kind: "invalid",
-          path: override,
-          message: "SPOTIFY_CONFIG must be an absolute path.",
-        }
-  }
-
-  return {
-    kind: "default",
-    path: configPathFor(input.platform, input.home, input.xdgConfigHome),
-  }
-}
-
-const textField = Effect.fn("textField")(
-  (value: Schema.Schema.Type<typeof Schema.Unknown>) =>
+export class ConfigResolveError extends Schema.TaggedError<ConfigResolveError>()(
+  "SpotUI/ConfigResolveError",
+  { path: Schema.String, message: Schema.String, cause: Schema.Unknown }
+) {}
+export const resolveConfigPath = Effect.fn("resolveConfigPath")(
+  (input: typeof ConfigPathInput.Type) =>
     Effect.gen(function* () {
-      if (typeof value !== "string") return yield* Effect.succeed(null)
+      const override = input.override?.trim()
+      if (override) {
+        return yield* Effect.suspend(() =>
+          isAbsolutePath(override)
+            ? Effect.succeed({ kind: "override", path: override })
+            : Effect.fail(
+                new ConfigResolveError({
+                  cause: "invalid",
+                  path: override,
+                  message: "SPOTIFY_CONFIG must be an absolute path.",
+                })
+              )
+        )
+      }
 
-      return yield* Effect.succeed(value.trim())
+      return yield* Effect.succeed({
+        kind: "default",
+        path: yield* configPathFor(
+          input.platform,
+          input.home,
+          input.xdgConfigHome
+        ),
+      })
     })
 )
+const textField = Effect.fnUntraced(function* (
+  value: Schema.Schema.Type<typeof Schema.Unknown>
+) {
+  if (typeof value !== "string") return yield* Effect.succeed(null)
+
+  return yield* Effect.succeed(value.trim())
+})
 
 const ConfigFileSchema = Schema.Struct({
   spotify: Schema.optionalKey(
