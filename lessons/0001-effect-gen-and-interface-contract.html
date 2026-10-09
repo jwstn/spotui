@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson 1: Effects Are Values, Interfaces Are Contracts</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+<main>
+  <p class="kicker">Lesson 01 / about 8 minutes</p>
+  <h1>Effects are values. Interfaces are contracts.</h1>
+  <p class="lede">Use one distinction to understand the first bug in <code>attempt</code> and the first rule of solid Effect service design.</p>
+
+  <div class="callout">
+    <strong>Win for this lesson:</strong> You will be able to predict whether an Effect function returns the response you intended or accidentally returns another Effect.
+  </div>
+
+  <h2>1. The contract</h2>
+  <p>Read an Effect type as a three-part contract:</p>
+  <pre><code>Effect&lt;A, E, R&gt;
+          |  |  |
+          |  |  required environment
+          |  possible failure
+          successful value</code></pre>
+  <p>For a curl boundary, the useful target is something like:</p>
+  <pre><code>attempt(request): Effect&lt;CurlResponse, CurlError, never&gt;</code></pre>
+  <p>The caller should receive a response or a typed error. It should not need to know whether the implementation uses curl, fetch, or a fake process runner.</p>
+
+  <h2>2. The current bug</h2>
+  <p>In <a href="../src/service/curl.ts#L121"><code>src/service/curl.ts</code></a>, <code>attempt</code> is written as an Effect generator:</p>
+  <pre><code>const attempt = Effect.fn("CurlService/attempt")((request: CurlRequest) =&gt; {
+  return Effect.gen(function* () {
+    const args = yield* buildCurlArgs(request)
+    return Effect.timeoutOrElse(runProcess(args), {
+      duration: "15 seconds",
+      orElse: () =&gt; Effect.fail(timeoutError)
+    })
+  })
+})</code></pre>
+  <p>The expression after <code>return</code> is an Effect value. The generator does not run it. Therefore the generator succeeds with that Effect as its value:</p>
+  <pre><code>Effect&lt;Effect&lt;ProcessResult, CurlProcessError&gt;, never, never&gt;</code></pre>
+  <p>That is a nested Effect. It is usually a design smell at this boundary because the public method promised one operation, not an operation that hands the caller another operation.</p>
+
+  <h2>3. Yield versus return</h2>
+  <table>
+    <thead><tr><th>Expression</th><th>What happens</th></tr></thead>
+    <tbody>
+      <tr><td><code>return 42</code></td><td>The generator succeeds with the number <code>42</code>.</td></tr>
+      <tr><td><code>return Effect.succeed(42)</code></td><td>The generator succeeds with an Effect object. The result is nested.</td></tr>
+      <tr><td><code>return yield* Effect.succeed(42)</code></td><td>The Effect runs and the generator succeeds with the number <code>42</code>.</td></tr>
+    </tbody>
+  </table>
+  <p>So the local correction is conceptually:</p>
+  <pre><code>return yield* Effect.timeoutOrElse(runProcess(args), options)</code></pre>
+  <p>Do not patch the file yet. First learn to recognize the contract that the interface should enforce.</p>
+
+  <h2>4. What <code>Effect.fn</code> adds</h2>
+  <p>The <a href="../.opencode/references/effect-smol/packages/effect/src/Effect.ts#L13565">effect-smol reference</a> describes <code>Effect.fn("Name")</code> as a reusable function builder with a readable tracing and stack-frame boundary.</p>
+  <pre><code>const attempt = Effect.fn("CurlService.attempt")(
+  function*(request: CurlRequest): Effect.fn.Return&lt;CurlResponse, CurlError&gt; {
+    const args = yield* buildCurlArgs(request)
+    return yield* Effect.timeoutOrElse(runProcess(args), options)
+  }
+)</code></pre>
+  <p>Notice two design choices:</p>
+  <ul>
+    <li>The generator body makes sequencing visible.</li>
+    <li>The return annotation states the intended boundary and lets TypeScript expose accidental nesting.</li>
+  </ul>
+  <p>Use <code>Effect.fnUntraced</code> for reusable helpers where tracing is not useful. Use the named <code>Effect.fn</code> form for important service operations such as an attempt, request, or decode step.</p>
+
+  <section class="quiz" data-quiz>
+    <p class="quiz-question">Inside <code>Effect.gen</code>, what does <code>return Effect.timeoutOrElse(...)</code> do?</p>
+    <div class="quiz-options">
+      <button data-answer="correct">Return value</button>
+      <button data-answer="wrong">Yield effect</button>
+      <button data-answer="wrong">Create layer</button>
+    </div>
+    <p class="feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>5. Interface lens</h2>
+  <p><code>attempt</code> is an implementation step, not necessarily the public service interface. A stronger design will later separate:</p>
+  <pre><code>request model
+  -&gt; process execution
+  -&gt; response classification
+  -&gt; JSON decoding
+  -&gt; Spotify domain mapping</code></pre>
+  <p>Each seam can then state one focused guarantee. The Spotify API should not receive a raw process result, and the process runner should not know Spotify schemas.</p>
+
+  <h2>Practice</h2>
+  <ol>
+    <li>Without running code, write the full <code>Effect&lt;A, E, R&gt;</code> type you think the current <code>attempt</code> function produces.</li>
+    <li>Explain in one sentence why <code>yield*</code> is necessary on the timeout expression.</li>
+    <li>Name one piece of information that should be hidden behind the process interface.</li>
+  </ol>
+  <p>Reply with your three answers. I will use them to decide whether Lesson 2 should focus on typed errors or on splitting the process boundary.</p>
+
+  <p class="footer-note">Primary source: <a href="../.opencode/references/effect-smol/packages/effect/src/Effect.ts#L13473">effect-smol Effect function documentation</a>. Quick reference: <a href="../reference/effect-interface-cheatsheet.html">Effect interface design cheat sheet</a>. Ask follow-up questions about any line that feels unclear.</p>
+</main>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

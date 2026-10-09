@@ -1,0 +1,2 @@
+allowBuilds:
+  '@lox-audioserver/node-librespot': true

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Effect Interface Design Cheat Sheet</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+<main>
+  <p class="kicker">SpotUI / Effect reference</p>
+  <h1>Effect Interface Design</h1>
+  <p class="lede">A compact guide for reading the curl boundary as a set of contracts rather than one large function.</p>
+
+  <h2>Read the type</h2>
+  <p><span class="formula">Effect&lt;A, E, R&gt;</span> means: an operation that may succeed with <code>A</code>, fail with <code>E</code>, and require services from <code>R</code>.</p>
+  <pre><code>attempt(request): Effect&lt;CurlResponse, CurlError, never&gt;</code></pre>
+  <p>This promises a response or a typed curl error. It does not promise that the process is successful merely because it returned a value.</p>
+
+  <h2>Sequence, do not nest</h2>
+  <table>
+    <thead><tr><th>Code</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>return value</code></td><td>Finish the generator with a plain success value. If <code>value</code> is an Effect, the success value is itself an Effect.</td></tr>
+      <tr><td><code>yield* effect</code></td><td>Run the Effect, extract its success value, and propagate its failure and requirements.</td></tr>
+      <tr><td><code>Effect.flatMap(effect, next)</code></td><td>Explicitly sequence one Effect into another without generator syntax.</td></tr>
+    </tbody>
+  </table>
+  <pre><code>Effect&lt;Effect&lt;A, E, R&gt;, never, R&gt;  // nested: usually accidental
+Effect&lt;A, E, R&gt;                    // sequenced: usually intended</code></pre>
+
+  <h2>Useful function choices</h2>
+  <table>
+    <thead><tr><th>Need</th><th>Use</th><th>Boundary question</th></tr></thead>
+    <tbody>
+      <tr><td>Named reusable workflow</td><td><code>Effect.fn("Name")</code></td><td>Should this operation have a readable tracing boundary?</td></tr>
+      <tr><td>Reusable hot-path helper</td><td><code>Effect.fnUntraced</code></td><td>Is tracing and stack capture unnecessary?</td></tr>
+      <tr><td>Promise API with expected failure</td><td><code>Effect.tryPromise</code></td><td>How is the rejection mapped into a typed error?</td></tr>
+      <tr><td>Timeout fallback</td><td><code>Effect.timeoutOrElse</code></td><td>What cleanup happens when the source is interrupted?</td></tr>
+      <tr><td>Resource ownership</td><td><code>Effect.acquireRelease</code></td><td>Who closes the process, stream, or server?</td></tr>
+      <tr><td>Retry policy</td><td><code>Effect.retry(schedule)</code></td><td>Which failures are retryable and for how long?</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Separate the seams</h2>
+  <pre><code>Request model
+  <p>A good interface hides mechanics while exposing the guarantees callers actually need. It should not force Spotify code to understand argv arrays, process exit codes, or response suffix parsing.</p>
+
+  <p><a href="../lessons/0001-effect-gen-and-interface-contract.html">Return to Lesson 1</a></p>
+</main>
+</body>
+</html>
