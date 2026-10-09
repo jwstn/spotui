@@ -1,20 +1,24 @@
-import { Effect, Schema } from "effect"
+import { Effect, Result, Schema } from "effect"
+import { refresh } from "effect/unstable/reactivity/Atom"
 import { stat, mkdir, readFile, writeFile, chmod } from "node:fs/promises"
 import { dirname as nodeDirname, join as nodeJoin } from "node:path"
 
-export type ConfigPlatform = "linux" | "macos" | "windows"
+export const ConfigPlatform = Schema.Literals(["linux", "macos", "windows"])
+export type ConfigPlatform = typeof ConfigPlatform.Type
 
 export const KEYMASTER_CLIENT_ID = "65b708073fc0480ea92a077233ca87bd"
 
-export interface SpotifyCredentials {
-  readonly clientId: string
-  readonly refreshToken: string
-}
+export const SpotifyCredentials = Schema.Struct({
+  clientId: Schema.String,
+  refreshToken: Schema.String,
+})
+export type SpotifyCredentials = typeof SpotifyCredentials.Type
 
-export interface PlaybackCredentials {
-  readonly username: string
-  readonly credentialsJson: string
-}
+export const PlaybackCredentials = Schema.Struct({
+  username: Schema.String,
+  credentialsJson: Schema.String,
+})
+export type PlaybackCredentials = typeof PlaybackCredentials.Type
 
 export const playbackCredentialsPathFor = (configPath: string) =>
   nodeJoin(nodeDirname(configPath), "playback.json")
@@ -48,29 +52,43 @@ export const writePlaybackCredentials = (
       ),
   })
 
-export type ParsedSpotifyConfig =
-  | ({ readonly kind: "ready"; readonly path: string } & SpotifyCredentials)
-  | {
-      readonly kind: "invalid"
-      readonly path: string
-      readonly message: string
-    }
+export const ParsedSpotifyConfig = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("ready"),
+    path: Schema.String,
+    ...SpotifyCredentials.fields,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("invalid"),
+    path: Schema.String,
+    message: Schema.String,
+  }),
+])
+export type ParsedSpotifyConfig = typeof ParsedSpotifyConfig.Type
 
-export type ConfigPath =
-  | { readonly kind: "default"; readonly path: string }
-  | { readonly kind: "override"; readonly path: string }
-  | {
-      readonly kind: "invalid"
-      readonly path: string
-      readonly message: string
-    }
+export const ConfigPath = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("default"),
+    path: Schema.String,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("override"),
+    path: Schema.String,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("invalid"),
+    path: Schema.String,
+    message: Schema.String,
+  }),
+])
+export type ConfigPath = typeof ConfigPath.Type
 
-export interface ConfigPathInput {
-  readonly platform: ConfigPlatform
-  readonly home: string
-  readonly xdgConfigHome?: string
-  readonly override?: string
-}
+export const ConfigPathInput = Schema.Struct({
+  platform: ConfigPlatform,
+  home: Schema.String,
+  xdgConfigHome: Schema.String,
+  override: Schema.String,
+})
 
 const join = (parts: readonly string[], separator: "/" | "\\") =>
   parts
@@ -99,7 +117,9 @@ export const configPathFor = (
   return `${home}\\AppData\\Local\\spotui\\config.toml`
 }
 
-export const resolveConfigPath = (input: ConfigPathInput): ConfigPath => {
+export const resolveConfigPath = (
+  input: typeof ConfigPathInput.Type
+): ConfigPath => {
   const override = input.override?.trim()
   if (override) {
     return isAbsolutePath(override)
@@ -117,8 +137,14 @@ export const resolveConfigPath = (input: ConfigPathInput): ConfigPath => {
   }
 }
 
-const textField = (value: unknown) =>
-  typeof value === "string" && value.trim().length > 0 ? value.trim() : null
+const textField = Effect.fn("textField")(
+  (value: Schema.Schema.Type<typeof Schema.Unknown>) =>
+    Effect.gen(function* () {
+      if (typeof value !== "string") return yield* Effect.succeed(null)
+
+      return yield* Effect.succeed(value.trim())
+    })
+)
 
 const ConfigFileSchema = Schema.Struct({
   spotify: Schema.optionalKey(
@@ -129,66 +155,140 @@ const ConfigFileSchema = Schema.Struct({
   ),
 })
 
-export const parseSpotifyConfig = (
-  contents: string,
-  path: string
-): ParsedSpotifyConfig => {
-  let value: unknown
-  try {
-    value = Bun.TOML.parse(contents)
-  } catch {
-    return { kind: "invalid", path, message: "Config is not valid TOML." }
-  }
+export const parseSpotifyConfig = Effect.fn("parseSpotifyConfig")(
+  (contents: string, path: string) =>
+    Effect.gen(function* () {
+      const parsedConfigContents = yield* Effect.result(
+        Effect.try({
+          try: () => Bun.TOML.parse(contents),
+          catch: (cause) => cause,
+        })
+      )
 
-  let decoded: Schema.Schema.Type<typeof ConfigFileSchema>
-  try {
-    decoded = Schema.decodeUnknownSync(ConfigFileSchema)(value)
-  } catch {
-    return { kind: "invalid", path, message: "Config fields are invalid." }
-  }
+      if (Result.isFailure(parsedConfigContents)) {
+        return yield* Effect.fail({
+          kind: "invalid",
+          path,
+          message: "config is not valid TOML",
+        })
+      }
 
-  if (!decoded.spotify) {
-    return { kind: "invalid", path, message: "Missing [spotify] section." }
-  }
+      const decodedConfigContents = yield* Effect.result(
+        Effect.try({
+          try: () =>
+            Schema.decodeUnknownSync(ConfigFileSchema)(parsedConfigContents),
+          catch: (cause) => cause,
+        })
+      )
 
-  const clientId = textField(decoded.spotify.client_id) ?? KEYMASTER_CLIENT_ID
+      if (Result.isFailure(decodedConfigContents)) {
+        return yield* Effect.fail({
+          kind: "invalid",
+          path,
+          message: "Config fields are invalid.",
+        })
+      }
 
-  const refreshToken = textField(decoded.spotify.refresh_token)
-  if (!refreshToken) {
-    return { kind: "invalid", path, message: "Missing spotify.refresh_token." }
-  }
+      if (!decodedConfigContents.success) {
+        return yield* Effect.fail({
+          kind: "invalid",
+          path,
+          message: "Missing [spotify] section.",
+        })
+      }
 
-  return { kind: "ready", path, clientId, refreshToken }
-}
+      const clientId = yield* textField(
+        decodedConfigContents.success.spotify?.client_id
+      ) ?? KEYMASTER_CLIENT_ID
+
+      const refreshToken = yield* textField(
+        decodedConfigContents.success.spotify?.refresh_token
+      )
+
+      if (!refreshToken) {
+        return yield* Effect.fail({
+          kind: "invalid",
+          path,
+          message: "Missing spotify refresh_token",
+        })
+      }
+
+      return yield* Effect.succeed({
+        kind: "ready",
+        path,
+        clientId,
+        refreshToken,
+      })
+    })
+)
 
 export class ConfigReadError extends Schema.TaggedError<ConfigReadError>()(
   "SpotUI/ConfigReadError",
   { path: Schema.String, message: Schema.String, cause: Schema.Unknown }
 ) {}
 
-export const readConfig = (path: string) =>
-  Effect.tryPromise({
-    try: async () => {
-      const file = Bun.file(path)
-      if (!(await file.exists())) {
-        return { kind: "missing" as const, path }
-      }
-      if (process.platform !== "win32") {
-        const permissions = (await stat(path)).mode & 0o777
-        if ((permissions & 0o077) !== 0) {
-          return {
-            kind: "invalid" as const,
+export const readConfig = Effect.fn("readConfig")((path: string) =>
+  Effect.gen(function* () {
+    const file = Bun.file(path)
+
+    const exists = yield* Effect.result(
+      Effect.tryPromise({
+        try: () => file.exists(),
+        catch: (cause) => cause,
+      })
+    )
+
+    if (Result.isFailure(exists)) {
+      return yield* Effect.fail(
+        new ConfigReadError({
+          path,
+          cause: exists.toString(),
+          message: "Config file not found",
+        })
+      )
+    }
+
+    if (process.platform !== "win32") {
+      const fileStats = yield* Effect.tryPromise({
+        try: () => stat(path),
+        catch: (cause) =>
+          new ConfigReadError({
+            path,
+            message: "Config could not be read.",
+            cause,
+          }),
+      })
+
+      const permissions = fileStats.mode & 0o777
+
+      if ((permissions & 0o077) !== 0) {
+        return yield* Effect.fail(
+          new ConfigReadError({
+            cause: "invalid permission",
             path,
             message: "Config permissions are too broad; use chmod 600.",
-          }
-        }
+          })
+        )
       }
-      return parseSpotifyConfig(await file.text(), path)
-    },
-    catch: (cause) =>
-      new ConfigReadError({
-        path,
-        message: "Config could not be read.",
-        cause,
-      }),
+    }
+
+    const contents = yield* Effect.result(
+      Effect.tryPromise({
+        try: () => file.text(),
+        catch: (cause) => cause,
+      })
+    )
+
+    if (Result.isFailure(contents)) {
+      return yield* Effect.fail(
+        new ConfigReadError({
+          path,
+          cause: contents.toString(),
+          message: "Could not read config contents",
+        })
+      )
+    }
+
+    return yield* parseSpotifyConfig(contents.success, path)
   })
+)
