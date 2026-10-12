@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson 7: Live and Test Layers</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+<main>
+  <p class="kicker">Lesson 07 / about 10 minutes</p>
+  <h1>One interface, different layers.</h1>
+  <p class="lede">Use the same typed service contract for production behavior and deterministic tests without pretending that every implementation detail needs an abstraction.</p>
+
+  <div class="callout">
+    <strong>Win for this lesson:</strong> You will be able to explain what belongs in a live layer, what belongs in a test layer, and how <code>Layer.provide</code> makes the choice explicit.
+  </div>
+
+  <h2>1. The service is the seam</h2>
+  <pre><code>class CurlService extends Context.Service&lt;CurlService, {
+  runJson: &lt;S&gt;(schema: S, request: CurlRequest) =&gt;
+    Effect.Effect&lt;Decoded&lt;S&gt;, CurlError | SchemaError&gt;
+}&gt;()("SpotUI/CurlService") {}</code></pre>
+  <p>The callers depend on this contract. They do not depend on <code>Bun.spawn</code>, process handles, or the cleanup algorithm.</p>
+
+  <h2>2. The live layer</h2>
+  <pre><code>const CurlServiceLive = Layer.effect(
+  CurlService,
+  Effect.gen(function* () {
+    const runJson = Effect.fn("CurlService.runJson")(
+      function* (schema, request) {
+        // spawn curl, classify status, parse, decode
+      }
+    )
+    return CurlService.of({ runJson })
+  })
+)</code></pre>
+  <p>The live layer owns Bun, curl, cleanup, status classification, and retry policy. These mechanics are not visible to Spotify API callers.</p>
+
+  <h2>3. The test layer</h2>
+  <pre><code>const CurlServiceTest = Layer.succeed(CurlService, {
+  runJson: (_schema, request) =&gt; {
+    if (request.url.endsWith("/me/playlists")) {
+      return Effect.succeed(fakePlaylistsResponse)
+    }
+    return Effect.fail(new TestCurlError({ message: "Unexpected request" }))
+  }
+})</code></pre>
+  <p>The test layer has the same interface but no network, process, or credentials. It can return successful decoded values or deliberate typed failures.</p>
+
+  <h2>4. Provide the layer at the boundary</h2>
+  <pre><code>const program = Effect.gen(function* () {
+  const api = yield* SpotifyApi
+  return yield* api.listPlaylists("test-token")
+}).pipe(
+  Effect.provide(SpotifyApiLive),
+  Effect.provide(CurlServiceTest)
+)</code></pre>
+  <p>The <a href="../.opencode/references/effect-smol/ai-docs/src/01_effect/03_services/20_layer-composition.ts">effect-smol layer guidance</a> distinguishes focused layers from production wiring. Tests should make their dependencies visible rather than allowing a service layer to silently replace a fake with a live implementation.</p>
+
+  <h2>5. Two kinds of tests</h2>
+  <table>
+    <thead><tr><th>Test</th><th>Layer</th><th>Proves</th></tr></thead>
+    <tbody>
+      <tr><td>Spotify API behavior</td><td>Test curl layer</td><td>Domain mapping, schema selection, and typed error handling.</td></tr>
+      <tr><td>Process integration</td><td>Live curl layer</td><td>Actual curl invocation, status parsing, timeout, and cleanup.</td></tr>
+    </tbody>
+  </table>
+  <p>This is why keeping Bun concrete does not prevent testing. You use a fake at the service boundary for most tests and reserve live tests for the process boundary itself.</p>
+
+  <section class="quiz" data-quiz>
+    <p class="quiz-question">Which layer should call <code>Bun.spawn</code>?</p>
+    <div class="quiz-options">
+      <button data-answer="correct">Live layer</button>
+      <button data-answer="wrong">Test layer</button>
+      <button data-answer="wrong">Spotify layer</button>
+    </div>
+    <p class="feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>Practice</h2>
+  <ol>
+    <li>What should a test curl layer return for a successful playlist request?</li>
+    <li>What should a live integration test prove that a fake layer cannot?</li>
+    <li>Why is explicit layer provision better than silently provisioning the live curl layer inside <code>SpotifyApiLive</code>?</li>
+  </ol>
+  <p>Reply with your three answers. Next we will assemble the complete interface and identify which current curl mistakes it prevents.</p>
+
+  <p class="footer-note">Primary sources: <a href="../.opencode/references/effect-smol/ai-docs/src/01_effect/03_services/01_service.ts">Context.Service</a>, <a href="../.opencode/references/effect-smol/ai-docs/src/01_effect/03_services/20_layer-composition.ts">Layer composition</a>, and <a href="../.opencode/references/effect-smol/ai-docs/src/09_testing/20_layer-tests.ts">layer tests</a>. Return to <a href="./0006-timeouts-and-resource-ownership.html">Lesson 6</a>.</p>
+</main>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson 6: Timeouts and Resource Ownership</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+<main>
+  <p class="kicker">Lesson 06 / about 10 minutes</p>
+  <h1>A timeout is an interruption, not cleanup.</h1>
+  <p class="lede">Learn what <code>Effect.timeoutOrElse</code> guarantees, what <code>tryPromise</code> must do with its signal, and where process ownership belongs.</p>
+
+  <div class="callout">
+    <strong>Win for this lesson:</strong> You will be able to distinguish stopping an Effect from proving that an external process and its streams are fully cleaned up.
+  </div>
+
+  <h2>1. What timeout does</h2>
+  <p>The <a href="../.opencode/references/effect-smol/packages/effect/src/Effect.ts#L8661">effect-smol documentation</a> describes <code>timeoutOrElse</code> as interrupting the source when the duration is reached, then lazily evaluating the fallback.</p>
+  <pre><code>Effect.timeoutOrElse(runProcess(args), {
+  duration: "15 seconds",
+  orElse: () =&gt; Effect.fail(timeoutError)
+})</code></pre>
+  <p>This changes the Effect result. It does not automatically understand the process handle created inside <code>runProcess</code>.</p>
+
+  <h2>2. Pass interruption to the external API</h2>
+  <p><code>Effect.tryPromise</code> supplies an <code>AbortSignal</code>. The wrapped operation must connect that signal to the external operation:</p>
+  <pre><code>Effect.tryPromise({
+  try: async (signal) =&gt; {
+    const process = Bun.spawn({ cmd: args, stdout: "pipe", stderr: "pipe" })
+    const kill = () =&gt; process.kill()
+    signal.addEventListener("abort", kill, { once: true })
+    // collect output and await exit
+  },
+  catch: toProcessError
+})</code></pre>
+  <p>This is necessary, but it is not the complete ownership story. Calling <code>kill</code> starts termination; it does not prove that the child has exited or that all output readers have finished.</p>
+
+  <h2>3. Acquire, use, release</h2>
+  <p>The <a href="../.opencode/references/effect-smol/ai-docs/src/01_effect/05_resources/10_acquire-release.ts">effect-smol resource example</a> uses <code>Effect.acquireRelease</code> to pair creation with cleanup:</p>
+  <pre><code>const resource = yield* Effect.acquireRelease(
+  acquireProcess,
+  (process, exit) =&gt; releaseProcess(process, exit)
+)</code></pre>
+  <p>The release action runs when the surrounding scope closes, including failure and interruption. This makes ownership explicit instead of relying on every caller to remember cleanup.</p>
+
+  <h2>4. The interface question</h2>
+  <p>Ask who owns the process:</p>
+  <ul>
+    <li>If <code>runProcess</code> owns it, <code>runProcess</code> must guarantee exit and stream cleanup before its Effect completes or is released.</li>
+    <li>If a scoped process resource owns it, the resource's release action must terminate and await it.</li>
+    <li><code>attempt</code> should not need to know how Bun processes are cleaned up.</li>
+  </ul>
+  <p>A good interface does not merely expose <code>kill()</code>. It exposes a completion guarantee: after the Effect is done, the owned process is no longer running.</p>
+
+  <section class="quiz" data-quiz>
+    <p class="quiz-question">What does <code>process.kill()</code> alone prove?</p>
+    <div class="quiz-options">
+      <button data-answer="wrong">Process finished</button>
+      <button data-answer="correct">Termination started</button>
+      <button data-answer="wrong">Streams drained</button>
+    </div>
+    <p class="feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>Practice</h2>
+  <ol>
+    <li>What must the abort listener do when the timeout interrupts <code>runProcess</code>?</li>
+    <li>Why is waiting for process exit different from calling <code>kill()</code>?</li>
+    <li>Which function should own the cleanup guarantee: <code>attempt</code> or <code>runProcess</code>?</li>
+  </ol>
+  <p>Reply with your three answers. Next we will connect this cleanup contract to Effect layers and live tests.</p>
+
+  <p class="footer-note">Primary sources: <a href="../.opencode/references/effect-smol/packages/effect/src/Effect.ts#L8661">timeoutOrElse</a>, <a href="../.opencode/references/effect-smol/ai-docs/src/01_effect/05_resources/10_acquire-release.ts">acquireRelease</a>, and <a href="../.opencode/references/effect-smol/ai-docs/src/60_child-process/10_working-with-child-processes.ts">child-process resource usage</a>. Return to <a href="./0005-retry-policy-with-schedule.html">Lesson 5</a>.</p>
+</main>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson 4: Safe Error Data</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+<main>
+  <p class="kicker">Lesson 04 / about 8 minutes</p>
+  <h1>An error is retained data.</h1>
+  <p class="lede">Design error fields for the moment after failure, when the error may be logged, displayed, nested as a cause, or held in application state.</p>
+
+  <div class="callout">
+    <strong>Win for this lesson:</strong> You will be able to distinguish useful diagnostics from secrets and raw provider data that should never enter a retained error.
+  </div>
+
+  <h2>1. Why full args are unsafe</h2>
+  <p>The current <a href="../src/service/curl.ts#L53"><code>CurlProcessError</code></a> stores <code>args</code>. But curl arguments include:</p>
+  <pre><code>--header "Authorization: Bearer &lt;access token&gt;"
+--data "refresh_token=&lt;refresh token&gt;"</code></pre>
+  <p>Once those values enter an error, they may be retained by a higher-level error, printed by a logger, shown in a crash report, or inspected during debugging.</p>
+
+  <h2>2. Store a safe request summary</h2>
+  <p>Prefer a deliberately small summary:</p>
+  <pre><code>request: {
+  method: "POST",
+  host: "accounts.spotify.com",
+  path: "/api/token"
+}
+statusCode: 401
+exitCode: 22
+kind: "http"
+retryAfterSeconds: null</code></pre>
+  <p>Do not store raw command arguments, authorization headers, form values, query strings that may contain credentials, or unrestricted response bodies.</p>
+
+  <h2>3. Redacted is helpful, not magic</h2>
+  <p>The <a href="../.opencode/references/effect-smol/packages/effect/src/Redacted.ts#L1">effect-smol <code>Redacted</code> reference</a> says that normal string, JSON, and inspection output hides the wrapped value. It reduces accidental leaks:</p>
+  <pre><code>const token = Redacted.make(accessToken)
+// logs and inspection show a redacted placeholder
+const raw = Redacted.value(token) // trusted code can recover it</code></pre>
+  <p>It is not cryptographic protection. The underlying value remains in memory. More importantly, redacting a credential in one object does not make it safe to place the original credential into curl arguments or another error field.</p>
+
+  <h2>4. Error type as an interface</h2>
+  <p>A typed error does two jobs:</p>
+  <ul>
+    <li>It gives program code stable fields such as <code>kind</code> and <code>statusCode</code>.</li>
+    <li>It defines what diagnostic data the application is allowed to retain.</li>
+  </ul>
+  <p>That means the error schema is part of the service interface, not an afterthought added when logging fails.</p>
+
+  <section class="quiz" data-quiz>
+    <p class="quiz-question">What should a retained curl error contain?</p>
+    <div class="quiz-options">
+      <button data-answer="correct">Safe summary</button>
+      <button data-answer="wrong">Full arguments</button>
+      <button data-answer="wrong">Raw response</button>
+    </div>
+    <p class="feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>Practice</h2>
+  <p>Design a safe replacement for <code>CurlProcessError.args</code>. List:</p>
+  <ol>
+    <li>Three fields you would retain.</li>
+    <li>Three fields you would explicitly exclude.</li>
+    <li>One reason <code>Redacted</code> does not replace redaction at the curl boundary.</li>
+  </ol>
+  <p>Reply with your proposal. Then we will design retryability and see how the error fields drive <code>Effect.retry</code>.</p>
+
+  <p class="footer-note">Primary source: <a href="../.opencode/references/effect-smol/packages/effect/src/Redacted.ts#L1">effect-smol Redacted</a>. Related example: <a href="../.opencode/references/effect-smol/ai-docs/src/01_effect/05_resources/10_acquire-release.ts">effect-smol resource and error design</a>. Return to <a href="./0003-typed-decoding-errors.html">Lesson 3</a>.</p>
+</main>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

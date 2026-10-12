@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson 10: Two Schemas, One Workflow</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+<main>
+  <p class="kicker">Lesson 10 / about 10 minutes</p>
+  <h1>Two schemas, two owners.</h1>
+  <p class="lede">The request schema protects the transport boundary. The response schema carries the caller's domain meaning.</p>
+
+  <div class="callout">
+    <strong>Win for this lesson:</strong> You will be able to place request and response decoding in the same workflow without confusing their ownership or error meanings.
+  </div>
+
+  <h2>1. The two schemas</h2>
+  <table>
+    <thead><tr><th>Schema</th><th>Owner</th><th>What it produces</th></tr></thead>
+    <tbody>
+      <tr><td><code>CurlRequestSchema</code></td><td><code>CurlService</code></td><td>A trusted internal request with valid method, URL, headers, and form data.</td></tr>
+      <tr><td><code>responseSchema</code></td><td>Caller such as <code>AuthService</code></td><td>The domain-shaped value the caller wants to use.</td></tr>
+    </tbody>
+  </table>
+  <p>The caller supplies a response schema because only the caller knows whether the response should be a token, playlist page, or track page. The curl service owns its request schema because it defines the transport input it can execute.</p>
+
+  <h2>2. The workflow</h2>
+  <pre><code>const runJson = Effect.fn("CurlService.runJson")(
+  function* (responseSchema, encodedRequest) {
+    const request = yield* Schema.decodeUnknownEffect(CurlRequestSchema)(
+      encodedRequest
+    )
+    const response = yield* attempt(request)
+    const json = yield* parseJson(response.stdout)
+    return yield* Schema.decodeUnknownEffect(responseSchema)(json)
+  }
+)</code></pre>
+  <p>Read the steps in order:</p>
+  <ol>
+    <li>Decode the transport request.</li>
+    <li>Execute and classify the process response.</li>
+    <li>Parse the response body as JSON.</li>
+    <li>Decode JSON using the caller's response schema.</li>
+  </ol>
+
+  <h2>3. The error channel grows honestly</h2>
+  <pre><code>request decode  -&gt; SchemaError
+attempt         -&gt; CurlProcessError
+JSON.parse      -&gt; CurlJsonError
+response decode -&gt; SchemaError
+
+runJson error = SchemaError
+              | CurlProcessError
+              | CurlJsonError</code></pre>
+  <p>Two schema operations can produce the same broad error family while still failing for different reasons. If useful to callers, use context or separate typed errors to distinguish invalid request construction from invalid provider response.</p>
+
+  <h2>4. What the caller sees</h2>
+  <pre><code>yield* curl.runJson(
+  RawTokenResponseSchema,       // response meaning
+  refreshTokenRequest(credentials) // encoded request data
+)</code></pre>
+  <p>The caller does not provide <code>CurlRequestSchema</code>. It provides request data and chooses the response meaning.</p>
+
+  <section class="quiz" data-quiz>
+    <p class="quiz-question">Which schema does the caller provide to <code>runJson</code>?</p>
+    <div class="quiz-options">
+      <button data-answer="wrong">Request schema</button>
+      <button data-answer="correct">Response schema</button>
+      <button data-answer="wrong">Process schema</button>
+    </div>
+    <p class="feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>Practice</h2>
+  <ol>
+    <li>What does <code>CurlRequestSchema</code> produce after decoding?</li>
+    <li>Why does the caller provide the response schema?</li>
+    <li>At which step can a <code>CurlJsonError</code> occur?</li>
+  </ol>
+  <p>Reply with your three answers. Then we will sketch the concrete interface and test cases before touching the implementation.</p>
+
+  <p class="footer-note">Primary source: <a href="../.opencode/references/effect-smol/packages/effect/src/Schema.ts#L1347">effect-smol schema decoding</a>. Return to <a href="./0009-the-request-boundary.html">Lesson 9</a>.</p>
+</main>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>

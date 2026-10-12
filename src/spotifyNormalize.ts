@@ -1,19 +1,18 @@
 import type {
   Album,
   Artist,
-  EpisodeItem,
   Page,
-  PlaylistItem,
+  PlayListItem,
   PlaylistSummary,
   Track,
-} from "./domain"
+} from "#/service/domain"
 import type {
   RawAlbum,
   RawArtist,
   RawPlaylist,
   RawPlaylistItem,
   RawTrack,
-} from "./spotifySchemas"
+} from "#/spotifySchemas"
 import { Predicate } from "effect"
 
 const firstImage = (images: readonly { readonly url: string }[] | undefined) =>
@@ -55,7 +54,7 @@ export const normalizePlaylistItem = (
   raw: RawPlaylistItem,
   playlistId: string,
   position: number
-): PlaylistItem => {
+): PlayListItem => {
   const key = `${playlistId}:${position}`
   const item = raw.item ?? raw.track
   if (!Predicate.isObject(item)) {
@@ -68,7 +67,7 @@ export const normalizePlaylistItem = (
       key,
       id: typeof item.id === "string" ? item.id : null,
       name: typeof item.name === "string" ? item.name : "Unavailable episode",
-    } satisfies EpisodeItem
+    }
   }
 
   if (item.is_local === true || item.type === "local") {

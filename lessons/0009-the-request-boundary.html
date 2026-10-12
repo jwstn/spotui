@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson 9: The Request Boundary</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+<main>
+  <p class="kicker">Lesson 09 / about 10 minutes</p>
+  <h1>Choose where request data becomes trusted.</h1>
+  <p class="lede">The response schema belongs to the caller. The request boundary needs a similarly deliberate decision.</p>
+
+  <div class="callout">
+    <strong>Win for this lesson:</strong> You will be able to distinguish encoded request data from decoded internal request values and choose where schema decoding belongs.
+  </div>
+
+  <h2>1. Two representations</h2>
+  <table>
+    <thead><tr><th>Representation</th><th>Example</th><th>Trust level</th></tr></thead>
+    <tbody>
+      <tr><td>Encoded input</td><td><code>url: "https://api.spotify.com/v1/me"</code></td><td>External or boundary data; needs validation and decoding.</td></tr>
+      <tr><td>Decoded value</td><td><code>url: new URL(...)</code></td><td>Internal value that already passed the URL schema.</td></tr>
+    </tbody>
+  </table>
+  <p>The current file uses <code>Schema.URL</code>, whose type is a URL object, while callers pass strings. The schema describes a decoded value, but the boundary receives encoded data.</p>
+
+  <h2>2. Decode strings with the right schema</h2>
+  <p>The <a href="../.opencode/references/effect-smol/packages/effect/src/Schema.ts#L10370">effect-smol schema reference</a> distinguishes <code>Schema.URL</code> from <code>Schema.URLFromString</code>:</p>
+  <pre><code>const CurlRequestSchema = Schema.Struct({
+  method: Schema.Literals(["GET", "POST"]),
+  url: Schema.URLFromString,
+  headers: Schema.Record(Schema.String, Schema.String),
+  form: Schema.optional(Schema.Record(Schema.String, Schema.String))
+})</code></pre>
+  <p>Decoding this schema can turn a caller-friendly string into the internal URL value. The key is not the particular schema name; it is matching the schema's encoded input to the data the boundary actually receives.</p>
+
+  <h2>3. Where should decoding happen?</h2>
+  <p>There are two reasonable designs:</p>
+  <pre><code>Design A: service accepts encoded request
+caller -&gt; CurlService.runJson(schema, encodedRequest)
+       -&gt; CurlService decodes request and response
+
+Design B: service accepts decoded request
+caller -&gt; decode request once
+       -&gt; CurlService.runJson(schema, decodedRequest)</code></pre>
+  <p>For this application, the request builders are internal and already centralized. Design B can keep the service contract narrower, while Design A is useful if requests arrive from an untrusted boundary. Choose based on where the data enters the system, not on which schema looks more impressive.</p>
+
+  <h2>4. Interface consequence</h2>
+  <p>If the service accepts decoded requests, its contract can avoid leaking schema decoding requirements for the request:</p>
+  <pre><code>runJson&lt;S&gt;(
+  schema: S,
+  request: DecodedCurlRequest
+): Effect&lt;S["Type"], CurlError | SchemaError, S["DecodingServices"]&gt;</code></pre>
+  <p>If the service accepts encoded requests, request decoding becomes part of its own error and environment contract. Both are valid. The mistake is leaving the representation implicit.</p>
+
+  <section class="quiz" data-quiz>
+    <p class="quiz-question">What does <code>Schema.URLFromString</code> decode?</p>
+    <div class="quiz-options">
+      <button data-answer="correct">String to URL</button>
+      <button data-answer="wrong">URL to string</button>
+      <button data-answer="wrong">JSON to headers</button>
+    </div>
+    <p class="feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>Practice</h2>
+  <ol>
+    <li>Are the current Spotify request builders producing encoded or decoded request data?</li>
+    <li>Which design would you choose for this internal application: encoded request input or decoded request input?</li>
+    <li>Where should the request schema be applied in your chosen design?</li>
+  </ol>
+  <p>Reply with your three answers. Then we can turn the design into a testable interface without editing implementation code blindly.</p>
+
+  <p class="footer-note">Primary source: <a href="../.opencode/references/effect-smol/packages/effect/src/Schema.ts#L10370">effect-smol URL schemas</a>. Return to <a href="./0008-the-curl-interface-capstone.html">Lesson 8</a> or consult the <a href="../reference/effect-interface-cheatsheet.html">cheat sheet</a>.</p>
+</main>
+<script src="../assets/lesson.js"></script>
+</body>
+</html>
