@@ -1,5 +1,4 @@
 import { Effect, Result, Schema } from "effect"
-import { refresh } from "effect/unstable/reactivity/Atom"
 import { stat, mkdir, readFile, writeFile, chmod } from "node:fs/promises"
 import { dirname as nodeDirname, join as nodeJoin } from "node:path"
 
@@ -23,8 +22,8 @@ export type PlaybackCredentials = typeof PlaybackCredentials.Type
 export const playbackCredentialsPathFor = (configPath: string) =>
   nodeJoin(nodeDirname(configPath), "playback.json")
 
-export const readPlaybackCredentials = (path: string) =>
-  Effect.tryPromise({
+export const readPlaybackCredentials = (path: string) => {
+  return Effect.tryPromise({
     try: async () => {
       const file = Bun.file(path)
       if (!(await file.exists())) return null
@@ -35,6 +34,7 @@ export const readPlaybackCredentials = (path: string) =>
         `Spotify playback credentials could not be read: ${String(cause)}`
       ),
   })
+}
 
 export const writePlaybackCredentials = (
   path: string,
@@ -90,12 +90,13 @@ export const ConfigPathInput = Schema.Struct({
   override: Schema.String,
 })
 
-const isAbsolutePath = (value: Schema.Schema.Type<typeof Schema.String>) =>
-  Effect.succeed(
+const isAbsolutePath = (value: Schema.Schema.Type<typeof Schema.String>) => {
+  return Effect.succeed(
     value.startsWith("/") ||
       /^[A-Za-z]:[\\/]/.test(value) ||
       value.startsWith("\\\\")
   )
+}
 
 export const configPathFor = Effect.fnUntraced(function* (
   platform: ConfigPlatform,
